@@ -54,10 +54,36 @@ const getMediaType = (url: string): 'video' | 'image' => {
 
 export default function Media() {
   const params = useLoaderData<typeof loader>();
+  const [allMediaItems, setAllMediaItems] = useState<MediaItem[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const [videoStates, setVideoStates] = useState<Record<number, { liked: boolean }>>({});
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+
+  useEffect(() => {
+    setVideos(mediaItems.filter(item => item.type === 'video').map((item, index) => ({
+      src: item.url,
+      controls: true,
+      autoPlay: true,
+      muted: true,
+      playsInline: true,
+    })));
+  }, [mediaItems]);
+
+  // Load more videos as user scrolls
+  useEffect(() => {
+    if (allMediaItems.length === 0) return;
+
+    // Load current video + 3 ahead
+    const endIndex = Math.min(currentIndex + 4, allMediaItems.length);
+    const itemsToLoad = allMediaItems.slice(0, endIndex);
+
+    setMediaItems(itemsToLoad);
+  }, [currentIndex, allMediaItems]);
 
   const markMediaAsError = useCallback((index: number) => {
     setMediaItems(prev => prev.map((item, i) =>
@@ -68,7 +94,9 @@ export default function Media() {
   const startMediaStream = async () => {
     setIsLoading(true);
     setMediaItems([]);
+    setAllMediaItems([]);
     setHasStarted(true);
+    setCurrentIndex(0);
 
     try {
       console.log("Fetching media with params:", params);
@@ -96,14 +124,16 @@ export default function Media() {
       console.log(`Received ${data.mediaUrls.length} media URLs`);
 
       // Convert URLs to MediaItem objects
-      const mediaItems: MediaItem[] = data.mediaUrls.map((url: string, index: number) => ({
+      const allItems: MediaItem[] = data.mediaUrls.map((url: string, index: number) => ({
         url,
         type: getMediaType(url),
         id: `${Date.now()}-${index}`
       })).filter((item: MediaItem) => item.type !== "image" || !item.url.endsWith('.gif'));
 
-      console.log("Setting media items:", mediaItems);
-      setMediaItems(mediaItems);
+      console.log("Fetched all media items:", allItems.length);
+
+      // Store all items, the useEffect will handle loading the first 4
+      setAllMediaItems(allItems);
 
     } catch (error) {
       console.error("Error fetching media:", error);
@@ -138,34 +168,19 @@ export default function Media() {
           >
             {isLoading ? "Loading Media..." : "Load All Media"}
           </button>
-
-          <p className="text-gray-400 text-sm">
-            {isMobile
-              ? "Mobile: Pinch to zoom, double tap to zoom in/out, use navigation buttons"
-              : "Use ↑↓ arrow keys or swipe up/down to navigate between media"
-            }
-          </p>
         </div>
       </div>
     );
   }
 
-  const [videoStates, setVideoStates] = useState<Record<number, { liked: boolean }>>({});
-  const [videos, setVideos] = useState<VideoItem[]>([]);
-  
-  useEffect(() => {
-    setVideos(mediaItems.filter(item => item.type === 'video').map((item, index) => ({
-      src: item.url,
-      controls: true,
-      autoPlay: true,
-      muted: true,
-      playsInline: true,
-    })));
-  }, [mediaItems]);
-  
 
   const handleEndReached = () => {
     console.log('End reached');
+  };
+
+  const handleActiveIndexChange = (index: number) => {
+    console.log('Active index changed to:', index);
+    setCurrentIndex(index);
   };
 
   const renderVideoOverlay = (item: VideoItem, index: number) => {
@@ -228,6 +243,7 @@ export default function Media() {
       <VerticalFeed
         items={videos}
         onEndReached={handleEndReached}
+        onActiveIndexChange={handleActiveIndexChange}
         className="h-full"
         renderItemOverlay={renderVideoOverlay}
       />
