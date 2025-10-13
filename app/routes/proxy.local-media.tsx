@@ -48,7 +48,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const webStream = new ReadableStream({
       start(controller) {
         fileStream.on('data', (chunk: Buffer | string) => {
-          controller.enqueue(typeof chunk === 'string' ? chunk :  new Uint8Array(chunk));
+          controller.enqueue(typeof chunk === 'string' ? chunk : new Uint8Array(chunk));
         });
         fileStream.on('end', () => {
           controller.close();
@@ -76,3 +76,4 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(errorMessage, { status: 500 });
   }
 }
+

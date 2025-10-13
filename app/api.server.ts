@@ -12,7 +12,7 @@ const getCookieString = () => {
 
 // Helper function to extract session key from cookies
 const getSessionKey = (): string | undefined => {
-  const sessionCookie = parsedCookies.find(cookie => 
+  const sessionCookie = parsedCookies.find(cookie =>
     cookie.name === 'session' || cookie.name === 'kemono_session'
   );
   return sessionCookie?.value;
@@ -21,7 +21,7 @@ const getSessionKey = (): string | undefined => {
 // Create kemono client instance
 const createKemonoClient = (baseUrl: string) => {
   const sessionKey = getSessionKey();
-  
+
   return new KemonoClient({
     baseUrl: baseUrl as any,
     sessionKey,
@@ -50,25 +50,25 @@ export const getAllUserMedia = async (
   limit: number = -1,
 ): Promise<string[]> => {
   const mediaUrls: string[] = [];
-  
+
   try {
     // Construct the base URL for the kemono client
     const baseUrl = new URL(base_api_path.trim(), base_domain.trim()).toString();
     const client = createKemonoClient(baseUrl);
-    
+
     // Use the kemono client to get posts by creator
     const posts = await client.posts.getByCreator(
-      service_name as KemonoService, 
+      service_name as KemonoService,
       userId
     );
-    
+
     // Apply pagination limits
     const startIndex = from * 50;
     const endIndex = to === -1 ? posts.length : Math.min(posts.length, (to + 1) * 50);
     const limitedPosts = limit === -1 ? posts.slice(startIndex, endIndex) : posts.slice(startIndex, startIndex + limit);
-    
+
     console.log(`Retrieved ${limitedPosts.length} posts for user ${userId} from service ${service_name}`);
-    
+
     // Extract media URLs from posts
     for (const post of limitedPosts) {
       // Add file URL if exists
@@ -91,12 +91,12 @@ export const getAllUserMedia = async (
     }
   } catch (error) {
     console.error('Error collecting user media with kemono client:', error);
-    
+
     // Fallback to original implementation if kemono client fails
     console.log('Falling back to original fetch implementation...');
     return await getAllUserMediaFallback(base_domain, base_api_path, service_name, userId, from, to, limit);
   }
-  
+
   return mediaUrls;
 };
 
@@ -111,7 +111,7 @@ const getAllUserMediaFallback = async (
   limit: number = -1,
 ): Promise<string[]> => {
   const mediaUrls: string[] = [];
-  
+
   try {
     for await (const post of iterateUserPosts(
       base_domain,
@@ -123,7 +123,7 @@ const getAllUserMediaFallback = async (
       limit
     )) {
       if (!post.page) continue;
-      
+
       // Add file URL if exists
       if (!isObjEmpty(post.page.file)) {
         const fileUrl = makeFileLink(base_domain, post.page.file.path).toString();
@@ -141,7 +141,7 @@ const getAllUserMediaFallback = async (
   } catch (error) {
     console.error('Error collecting user media:', error);
   }
-  
+
   return mediaUrls;
 };
 
@@ -158,18 +158,18 @@ const getUserPosts = async (
   if (reqUrl.pathname.charAt(reqUrl.pathname.length - 1) != "/") {
     reqUrl.pathname += "/";
   }
-  const path =  `${serviceId.trim()}/user/${userId.trim()}/posts`;
+  const path = `${serviceId.trim()}/user/${userId.trim()}/posts`;
   reqUrl.pathname += path;
   reqUrl.searchParams.append("o", offset.toString());
   console.log(`GET: ${reqUrl.toString()}`)
-  
+
   const cookieString = getCookieString();
-  
+
   const res = await fetch(reqUrl, {
-      headers:{
-        'Cookie': cookieString,
-        'Accept': 'text/css'
-      },
+    headers: {
+      'Cookie': cookieString,
+      'Accept': 'text/css'
+    },
     redirect: 'follow'
   });
   console.log(`path: ${path} status: ${res.status} ${res.statusText}`)
@@ -195,12 +195,12 @@ const iterateUserPosts = async function* (
       userId,
       50 * i,
     );
-    
+
     if (posts_res.status === 400) {
       console.log(`Reached end of available pages at page ${i} (offset ${50 * i})`);
       break;
     }
-    
+
     if (posts_res.status === 404) {
       console.log(`404 not found at page ${i} (offset ${50 * i})`);
       if (i === from) {
@@ -208,7 +208,7 @@ const iterateUserPosts = async function* (
       }
       break;
     }
-    
+
     if (!posts_res.ok) {
       console.log(`HTTP error ${posts_res.status} ${posts_res.statusText} at page ${i} (offset ${50 * i})`);
       if (i === from) {
@@ -216,21 +216,21 @@ const iterateUserPosts = async function* (
       }
       break;
     }
-    
+
     const body = await posts_res.text();
     try {
       const posts = JSON.parse(body)
-      
+
       if (posts.length == 0) {
         console.log(`No more posts found at page ${i} (offset ${50 * i})`);
         break;
       }
-      
+
       if (!isIterable(posts)) {
         console.log('Response is not iterable:', { posts })
         break;
       }
-      
+
       for (const post of posts) {
         if (limit == 0) break;
         yield { pageIndex: i, page: post };
@@ -337,3 +337,4 @@ export const getMediaFromDirectory = async (
     throw new Error(`Failed to read directory "${directoryPath}": ${errorMsg}`);
   }
 };
+
