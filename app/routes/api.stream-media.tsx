@@ -1,5 +1,5 @@
 import type { Route } from "./+types/api.stream-media";
-import { getAllUserMedia } from "~/api.server";
+import { getAllUserMedia, getMediaFromDirectory } from "~/api.server";
 import { getSession, commitSession, parsedCookies } from "~/sessions.server";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -8,41 +8,49 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const params = await request.json();
-  const { baseDomain, baseApiPath, serviceName, userId, from, to, limit } = params;
+  const { sourceType, directoryPath, sortBy, baseDomain, baseApiPath, serviceName, userId, from, to, limit } = params;
 
-  console.log('Fetching all media with params:', { baseDomain, baseApiPath, serviceName, userId, from, to, limit });
+  console.log('Fetching media with params:', params);
 
   try {
-    // Get session and set up cookies
-    const session = await getSession(request.headers.get("Cookie"));
-    session.set("userId", userId);
-
-    // Fetch all media URLs at once
-    const mediaUrls = await getAllUserMedia(
-      baseDomain,
-      baseApiPath,
-      serviceName,
-      userId,
-      from,
-      to,
-      limit
-    );
-
-    console.log(`Found ${mediaUrls.length} media URLs`);
-
-    // Create headers with cookies
+    let mediaUrls: string[];
     const headers = new Headers({
       "Content-Type": "application/json",
     });
 
-    // Set the session cookie
-    headers.append("Set-Cookie", await commitSession(session));
+    if (sourceType === "local") {
+      // Fetch media from local directory
+      console.log(`Fetching media from local directory: ${directoryPath}`);
+      mediaUrls = await getMediaFromDirectory(directoryPath, limit, sortBy);
+    } else {
+      console.log(`Fetching media from api: ${baseDomain}, userId: ${userId}`);
 
-    // Set additional cookies from the parsed cookie file (with localhost domain)
-    for (const cookie of parsedCookies) {
-      const cookieString = `${cookie.name}=${cookie.value}; Domain=localhost; Path=${cookie.path}; ${cookie.expires ? `Expires=${new Date(cookie.expires * 1000).toUTCString()};` : ''}`;
-      headers.append("Set-Cookie", cookieString);
+      // Get session and set up cookies for API source
+      const session = await getSession(request.headers.get("Cookie"));
+      session.set("userId", userId);
+
+      // Fetch all media URLs from API
+      mediaUrls = await getAllUserMedia(
+        baseDomain,
+        baseApiPath,
+        serviceName,
+        userId,
+        from,
+        to,
+        limit
+      );
+
+      // Set the session cookie
+      headers.append("Set-Cookie", await commitSession(session));
+
+      // Set additional cookies from the parsed cookie file (with localhost domain)
+      for (const cookie of parsedCookies) {
+        const cookieString = `${cookie.name}=${cookie.value}; Domain=localhost; Path=${cookie.path}; ${cookie.expires ? `Expires=${new Date(cookie.expires * 1000).toUTCString()};` : ''}`;
+        headers.append("Set-Cookie", cookieString);
+      }
     }
+
+    console.log(`Found ${mediaUrls.length} media URLs`);
 
     return Response.json({ mediaUrls }, { headers });
   } catch (error) {

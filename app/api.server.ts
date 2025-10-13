@@ -1,6 +1,9 @@
 import { KemonoClient, type Post, type KemonoService } from '@akomalabs/kemono';
 import { parsedCookies } from "./sessions.server";
 import { isObjEmpty } from "./utils";
+import { promises as fs } from 'fs';
+import path from 'path';
+import { getVideoDurationInSeconds } from 'get-video-duration';
 
 // Helper function to create cookie string from parsed cookies for session
 const getCookieString = () => {
@@ -253,3 +256,84 @@ function isIterable(obj: any): boolean {
   }
   return typeof obj[Symbol.iterator] === 'function';
 }
+
+// Get media from local directory
+export const getMediaFromDirectory = async (
+  directoryPath: string,
+  limit: number = -1,
+  sortBy: string = 'none'
+): Promise<string[]> => {
+  const supportedExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv'];
+
+  try {
+    // Normalize the path to handle both forward and backward slashes
+    const normalizedPath = path.resolve(directoryPath);
+    console.log(`Normalized directory path: ${normalizedPath}`);
+
+    const files = await fs.readdir(normalizedPath);
+
+    // Collect files with metadata
+    interface FileWithMetadata {
+      filePath: string;
+      fileName: string;
+      duration?: number;
+    }
+
+    const filesWithMetadata: FileWithMetadata[] = [];
+
+    for (const file of files) {
+      const ext = path.extname(file).toLowerCase();
+      if (supportedExtensions.includes(ext)) {
+        const filePath = path.join(normalizedPath, file);
+        const stats = await fs.stat(filePath);
+
+        if (stats.isFile()) {
+          const fileData: FileWithMetadata = {
+            filePath,
+            fileName: file,
+          };
+
+          // Get duration for video files if we need to sort by duration
+          if (sortBy.startsWith('duration') && videoExtensions.includes(ext)) {
+            try {
+              const duration = await getVideoDurationInSeconds(filePath);
+              fileData.duration = duration;
+              console.log(`${file}: ${duration.toFixed(2)}s`);
+            } catch (err) {
+              console.warn(`Could not get duration for ${file}:`, err);
+              fileData.duration = 0; // Default to 0 if duration can't be determined
+            }
+          }
+
+          filesWithMetadata.push(fileData);
+        }
+      }
+    }
+
+    // Sort files based on sortBy parameter
+    if (sortBy === 'duration-desc') {
+      filesWithMetadata.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+      console.log('Sorted by duration (longest first)');
+    } else if (sortBy === 'duration-asc') {
+      filesWithMetadata.sort((a, b) => (a.duration || 0) - (b.duration || 0));
+      console.log('Sorted by duration (shortest first)');
+    }
+    // If sortBy is 'none', keep original order (alphabetical from readdir)
+
+    // Apply limit and convert to URLs
+    const limitedFiles = limit === -1 ? filesWithMetadata : filesWithMetadata.slice(0, limit);
+    const mediaUrls = limitedFiles.map(file => {
+      const encodedPath = encodeURIComponent(file.filePath);
+      return `/proxy/local-media?path=${encodedPath}`;
+    });
+
+    console.log(`Found ${mediaUrls.length} media files in directory: ${normalizedPath}`);
+
+    return mediaUrls;
+  } catch (error) {
+    console.error('Error reading directory:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read directory "${directoryPath}": ${errorMsg}`);
+  }
+};

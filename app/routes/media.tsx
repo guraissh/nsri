@@ -24,6 +24,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     to: parseInt(url.searchParams.get("to") || "0"),
     limit: parseInt(url.searchParams.get("limit") || "-1"),
     lookahead: url.searchParams.get("lookahead") || "",
+    directoryPath: url.searchParams.get("directoryPath") || "",
+    sourceType: url.searchParams.get("sourceType") || "api",
+    sortBy: url.searchParams.get("sortBy") || "none",
   };
 
   return params;
@@ -55,7 +58,7 @@ const getMediaType = (url: string): 'video' | 'image' => {
 export default function Media() {
   const params = useLoaderData<typeof loader>();
   const [allMediaItems, setAllMediaItems] = useState<MediaItem[]>([]);
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+
   const [isLoading, setIsLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,15 +67,6 @@ export default function Media() {
   const [videoStates, setVideoStates] = useState<Record<number, { liked: boolean }>>({});
   const [videos, setVideos] = useState<VideoItem[]>([]);
 
-  useEffect(() => {
-    setVideos(mediaItems.filter(item => item.type === 'video').map((item, index) => ({
-      src: item.url,
-      controls: true,
-      autoPlay: true,
-      muted: true,
-      playsInline: true,
-    })));
-  }, [mediaItems]);
 
   // Load more videos as user scrolls
   useEffect(() => {
@@ -80,20 +74,27 @@ export default function Media() {
 
     // Load current video + 3 ahead
     const endIndex = Math.min(currentIndex + 4, allMediaItems.length);
+    console.log(`Updating videos for current index: ${currentIndex}, loading up to index: ${endIndex} out of ${allMediaItems.length}`);
     const itemsToLoad = allMediaItems.slice(0, endIndex);
-
-    setMediaItems(itemsToLoad);
+    setVideos(itemsToLoad.map((item) => ({
+      id: item.id,
+      src: item.url,
+      controls: true,
+      autoPlay: true,
+      muted: true,
+      playsInline: true,
+    })));
   }, [currentIndex, allMediaItems]);
 
   const markMediaAsError = useCallback((index: number) => {
-    setMediaItems(prev => prev.map((item, i) =>
+    setVideos(prev => prev.map((item, i) =>
       i === index ? { ...item, hasError: true } : item
     ));
   }, []);
 
   const startMediaStream = async () => {
     setIsLoading(true);
-    setMediaItems([]);
+    setVideos([]);
     setAllMediaItems([]);
     setHasStarted(true);
     setCurrentIndex(0);
@@ -123,16 +124,18 @@ export default function Media() {
 
       console.log(`Received ${data.mediaUrls.length} media URLs`);
 
-      // Convert URLs to MediaItem objects
-      const allItems: MediaItem[] = data.mediaUrls.map((url: string, index: number) => ({
-        url,
-        type: getMediaType(url),
-        id: `${Date.now()}-${index}`
-      })).filter((item: MediaItem) => item.type !== "image" || !item.url.endsWith('.gif'));
+      // Convert URLs to MediaItem objects - filter to videos only
+      const allItems: MediaItem[] = data.mediaUrls
+        .map((url: string, index: number) => ({
+          url,
+          type: getMediaType(url),
+          id: `${Date.now()}-${index}`
+        }))
+        .filter((item: MediaItem) => item.type === 'video');
 
-      console.log("Fetched all media items:", allItems.length);
+      console.log("Fetched video items:", allItems.length);
 
-      // Store all items, the useEffect will handle loading the first 4
+      // Store all video items, the useEffect will handle loading the first 4
       setAllMediaItems(allItems);
 
     } catch (error) {
@@ -178,14 +181,15 @@ export default function Media() {
     console.log('End reached');
   };
 
-  const handleActiveIndexChange = (index: number) => {
-    console.log('Active index changed to:', index);
+
+
+  const handleItemVisible = (_: VideoItem, index: number) => {
+    console.log('Item visible at index:', index);
     setCurrentIndex(index);
   };
 
   const renderVideoOverlay = (item: VideoItem, index: number) => {
     const { liked = false } = videoStates[index] || {};
-
     return (
       <div
         style={{
@@ -239,12 +243,13 @@ export default function Media() {
   };
 
   return (
-    <div className="w-full h-screen">
+    <div style={{ height: '100vh', width: '100vw' }} className="w-full h-screen">
       <VerticalFeed
         items={videos}
         onEndReached={handleEndReached}
-        onActiveIndexChange={handleActiveIndexChange}
-        className="h-full"
+        onItemVisible={handleItemVisible}
+        className="h-100vh"
+        style={{maxHeight: '100vh'}}
         renderItemOverlay={renderVideoOverlay}
       />
     </div>
