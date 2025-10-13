@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useState, useEffect } from "react";
+import { useNavigate, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
 
 export function meta({ }: Route.MetaArgs) {
@@ -7,6 +7,12 @@ export function meta({ }: Route.MetaArgs) {
     { title: "Media Stream Configuration" },
     { name: "description", content: "Configure and stream media content" },
   ];
+}
+
+export async function loader({ request }: Route.LoaderArgs) {
+  // Get ROOT_DIR from environment variable
+  const rootDir = process.env.ROOT_DIR || "";
+  return { rootDir };
 }
 
 interface Directory {
@@ -25,10 +31,12 @@ interface DirectoryListResponse {
 
 export default function Home() {
   const navigate = useNavigate();
+  const { rootDir } = useLoaderData<typeof loader>();
+
   const [formData, setFormData] = useState({
-    sourceType: "api",
-    directoryPath: "",
-    sortBy: "none",
+    sourceType: "local",
+    directoryPath: rootDir,
+    sortBy: "duration-desc",
     platform: "coomer",
     serviceName: "onlyfans",
     userId: "piripremium",

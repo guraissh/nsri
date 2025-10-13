@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useNavigate } from "react-router";
 import '@vidstack/react/player/styles/default/theme.css';
 import '@vidstack/react/player/styles/default/layouts/video.css';
 import type { Route } from "./+types/media";
 import { VerticalFeed, type VideoItem } from "react-vertical-feed";
-import { Heart } from 'lucide-react';
+import { ArrowUpDown, Download } from 'lucide-react';
 
 interface MediaItem {
 	url: string;
@@ -64,8 +64,8 @@ export default function Media() {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [currentIndex, setCurrentIndex] = useState(0);
 
-	const [videoStates, setVideoStates] = useState<Record<number, { liked: boolean }>>({});
 	const [videos, setVideos] = useState<VideoItem[]>([]);
+	const navigate = useNavigate();
 
 
 	// Load more videos as user scrolls
@@ -188,8 +188,44 @@ export default function Media() {
 		setCurrentIndex(index);
 	};
 
+	const handleDownload = (item: VideoItem) => {
+		const link = document.createElement('a');
+		link.href = item.src;
+		link.download = item.src.split('/').pop() || 'video';
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+	};
+
+	const handleCycleSortOrder = () => {
+		const currentSort = params.sortBy;
+		let nextSort = 'duration-desc';
+
+		if (currentSort === 'duration-desc') {
+			nextSort = 'duration-asc';
+		} else if (currentSort === 'duration-asc') {
+			nextSort = 'none';
+		}
+
+		// Navigate to the same page with updated sort parameter
+		const searchParams = new URLSearchParams(window.location.search);
+		searchParams.set('sortBy', nextSort);
+		navigate(`/media?${searchParams.toString()}`);
+	};
+
+	const getSortLabel = () => {
+		switch (params.sortBy) {
+			case 'duration-desc':
+				return 'Longest';
+			case 'duration-asc':
+				return 'Shortest';
+			case 'none':
+			default:
+				return 'Default';
+		}
+	};
+
 	const renderVideoOverlay = (item: VideoItem, index: number) => {
-		const { liked = false } = videoStates[index] || {};
 		return (
 			<div
 				style={{
@@ -199,13 +235,14 @@ export default function Media() {
 					display: 'flex',
 					flexDirection: 'column',
 					alignItems: 'center',
-					gap: '20px',
+					gap: '12px',
 					zIndex: 10,
 				}}
 			>
+				{/* Sort Button */}
 				<div
 					style={{
-						background: 'rgba(0, 0, 0, 0.5)',
+						background: 'rgba(0, 0, 0, 0.6)',
 						borderRadius: '12px',
 						padding: '8px',
 						backdropFilter: 'blur(4px)',
@@ -214,10 +251,7 @@ export default function Media() {
 					<button
 						onClick={e => {
 							e.stopPropagation();
-							setVideoStates(prev => ({
-								...prev,
-								[index]: { liked: !prev[index]?.liked },
-							}));
+							handleCycleSortOrder();
 						}}
 						style={{
 							background: 'none',
@@ -230,12 +264,48 @@ export default function Media() {
 							gap: '4px',
 						}}
 					>
-						<Heart
-							size={32}
-							fill={liked ? '#ff2d55' : 'none'}
-							color={liked ? '#ff2d55' : 'white'}
+						<ArrowUpDown
+							size={28}
+							color="white"
 						/>
-						<span style={{ color: 'white', fontSize: '14px' }}>{liked ? 'Liked' : 'Like'}</span>
+						<span style={{ color: 'white', fontSize: '12px', fontWeight: '500' }}>
+							{getSortLabel()}
+						</span>
+					</button>
+				</div>
+
+				{/* Download Button */}
+				<div
+					style={{
+						background: 'rgba(0, 0, 0, 0.6)',
+						borderRadius: '12px',
+						padding: '8px',
+						backdropFilter: 'blur(4px)',
+					}}
+				>
+					<button
+						onClick={e => {
+							e.stopPropagation();
+							handleDownload(item);
+						}}
+						style={{
+							background: 'none',
+							border: 'none',
+							cursor: 'pointer',
+							padding: '8px',
+							display: 'flex',
+							flexDirection: 'column',
+							alignItems: 'center',
+							gap: '4px',
+						}}
+					>
+						<Download
+							size={28}
+							color="white"
+						/>
+						<span style={{ color: 'white', fontSize: '12px', fontWeight: '500' }}>
+							Download
+						</span>
 					</button>
 				</div>
 			</div>

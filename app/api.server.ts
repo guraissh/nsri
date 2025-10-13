@@ -266,47 +266,71 @@ export const getMediaFromDirectory = async (
   const supportedExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv'];
 
+  interface FileWithMetadata {
+    filePath: string;
+    fileName: string;
+    duration?: number;
+  }
+
+  // Recursive function to collect all media files from directory and subdirectories
+  const collectMediaFiles = async (dirPath: string): Promise<FileWithMetadata[]> => {
+    const results: FileWithMetadata[] = [];
+
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+
+        try {
+          if (entry.isDirectory()) {
+            // Recursively process subdirectory
+            const subResults = await collectMediaFiles(fullPath);
+            results.push(...subResults);
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (supportedExtensions.includes(ext)) {
+              results.push({
+                filePath: fullPath,
+                fileName: entry.name,
+              });
+            }
+          }
+        } catch (err) {
+          // Skip files/directories we can't access
+          console.warn(`Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`Error reading directory ${dirPath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return results;
+  };
+
   try {
     // Normalize the path to handle both forward and backward slashes
     const normalizedPath = path.resolve(directoryPath);
-    console.log(`Normalized directory path: ${normalizedPath}`);
+    console.log(`Scanning directory recursively: ${normalizedPath}`);
 
-    const files = await fs.readdir(normalizedPath);
+    // Collect all media files recursively
+    const filesWithMetadata = await collectMediaFiles(normalizedPath);
 
-    // Collect files with metadata
-    interface FileWithMetadata {
-      filePath: string;
-      fileName: string;
-      duration?: number;
-    }
+    console.log(`Found ${filesWithMetadata.length} media files (before sorting/limiting)`);
 
-    const filesWithMetadata: FileWithMetadata[] = [];
-
-    for (const file of files) {
-      const ext = path.extname(file).toLowerCase();
-      if (supportedExtensions.includes(ext)) {
-        const filePath = path.join(normalizedPath, file);
-        const stats = await fs.stat(filePath);
-
-        if (stats.isFile()) {
-          const fileData: FileWithMetadata = {
-            filePath,
-            fileName: file,
-          };
-
-          // Get duration for video files if we need to sort by duration
-          if (sortBy.startsWith('duration') && videoExtensions.includes(ext)) {
-            try {
-              const duration = await getVideoDurationInSeconds(filePath);
-              fileData.duration = duration;
-              console.log(`${file}: ${duration.toFixed(2)}s`);
-            } catch (err) {
-              console.warn(`Could not get duration for ${file}:`, err);
-              fileData.duration = 0; // Default to 0 if duration can't be determined
-            }
+    // Get duration for video files if we need to sort by duration
+    if (sortBy.startsWith('duration')) {
+      for (const fileData of filesWithMetadata) {
+        const ext = path.extname(fileData.filePath).toLowerCase();
+        if (videoExtensions.includes(ext)) {
+          try {
+            const duration = await getVideoDurationInSeconds(fileData.filePath);
+            fileData.duration = duration;
+            console.log(`${fileData.fileName}: ${duration.toFixed(2)}s`);
+          } catch (err) {
+            console.warn(`Could not get duration for ${fileData.fileName}:`, err);
+            fileData.duration = 0; // Default to 0 if duration can't be determined
           }
-
-          filesWithMetadata.push(fileData);
         }
       }
     }
@@ -328,7 +352,7 @@ export const getMediaFromDirectory = async (
       return `/proxy/local-media?path=${encodedPath}`;
     });
 
-    console.log(`Found ${mediaUrls.length} media files in directory: ${normalizedPath}`);
+    console.log(`Returning ${mediaUrls.length} media files (after sorting/limiting)`);
 
     return mediaUrls;
   } catch (error) {
