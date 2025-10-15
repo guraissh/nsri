@@ -90,6 +90,52 @@ export default function Media() {
 		}));
 	}, [currentIndex, allMediaItems]);
 
+	// Clean up video resources when component unmounts or tab is hidden
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			if (document.hidden) {
+				// Tab is hidden - pause all videos and clear buffers
+				console.log('Tab hidden, cleaning up video resources');
+				const videoElements = document.querySelectorAll('video');
+				videoElements.forEach(video => {
+					video.pause();
+					// Remove src to free memory
+					const currentSrc = video.src;
+					video.removeAttribute('src');
+					video.load(); // This frees the buffer
+					// Store src for potential restoration
+					video.dataset.pausedSrc = currentSrc;
+				});
+			}
+		};
+
+		const handleBeforeUnload = () => {
+			// Clean up before page unload
+			const videoElements = document.querySelectorAll('video');
+			videoElements.forEach(video => {
+				video.pause();
+				video.removeAttribute('src');
+				video.load();
+			});
+		};
+
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		window.addEventListener('beforeunload', handleBeforeUnload);
+
+		return () => {
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			window.removeEventListener('beforeunload', handleBeforeUnload);
+
+			// Also cleanup on component unmount
+			const videoElements = document.querySelectorAll('video');
+			videoElements.forEach(video => {
+				video.pause();
+				video.removeAttribute('src');
+				video.load();
+			});
+		};
+	}, []);
+
 	const markMediaAsError = useCallback((index: number) => {
 		setVideos(prev => prev.map((item, i) =>
 			i === index ? { ...item, hasError: true } : item
@@ -190,6 +236,25 @@ export default function Media() {
 	const handleItemVisible = (_: VideoItem, index: number) => {
 		console.log('Item visible at index:', index);
 		setCurrentIndex(index);
+	};
+
+	const handleItemHidden = (_: VideoItem, index: number) => {
+		console.log('Item hidden at index:', index);
+		// Clean up the video element for hidden items after a delay
+		setTimeout(() => {
+			const videoElements = document.querySelectorAll('video');
+			if (videoElements[index]) {
+				const video = videoElements[index];
+				video.pause();
+				// Only clear if it's far from current index (more than 2 away)
+				if (Math.abs(index - currentIndex) > 2) {
+					const currentSrc = video.src;
+					video.removeAttribute('src');
+					video.load();
+					console.log(`Freed memory for video at index ${index}`);
+				}
+			}
+		}, 1000); // Delay to avoid thrashing during fast scrolling
 	};
 
 	const handleDownload = (item: VideoItem) => {
@@ -322,6 +387,7 @@ export default function Media() {
 				items={videos}
 				onEndReached={handleEndReached}
 				onItemVisible={handleItemVisible}
+				onItemHidden={handleItemHidden}
 				className="h-100vh"
 				style={{ maxHeight: '100dvh' }}
 				renderItemOverlay={renderVideoOverlay}
