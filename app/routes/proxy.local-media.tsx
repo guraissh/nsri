@@ -40,15 +40,60 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
 
     const contentType = contentTypes[ext] || 'application/octet-stream';
+    const fileSize = stats.size;
 
-    // Create a readable stream from the file
+    // Handle range requests for video seeking
+    const range = request.headers.get("range");
+
+    if (range) {
+      // Parse range header (e.g., "bytes=0-1023")
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = (end - start) + 1;
+
+      // Create stream for the requested range
+      const fileStream = createReadStream(normalizedPath, { start, end });
+
+      // Convert Node.js ReadableStream to Web ReadableStream
+      const webStream = new ReadableStream({
+        start(controller) {
+          fileStream.on('data', (chunk: Buffer) => {
+            controller.enqueue(new Uint8Array(chunk));
+          });
+          fileStream.on('end', () => {
+            controller.close();
+          });
+          fileStream.on('error', (error) => {
+            controller.error(error);
+          });
+        },
+        cancel() {
+          fileStream.destroy();
+        }
+      });
+
+      // Return 206 Partial Content
+      return new Response(webStream, {
+        status: 206,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Length": chunkSize.toString(),
+          "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "public, max-age=31536000",
+        },
+      });
+    }
+
+    // No range request - stream entire file
     const fileStream = createReadStream(normalizedPath);
 
     // Convert Node.js ReadableStream to Web ReadableStream
     const webStream = new ReadableStream({
       start(controller) {
-        fileStream.on('data', (chunk: Buffer | string) => {
-          controller.enqueue(typeof chunk === 'string' ? chunk : new Uint8Array(chunk));
+        fileStream.on('data', (chunk: Buffer) => {
+          controller.enqueue(new Uint8Array(chunk));
         });
         fileStream.on('end', () => {
           controller.close();
@@ -65,7 +110,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return new Response(webStream, {
       headers: {
         "Content-Type": contentType,
-        "Content-Length": stats.size.toString(),
+        "Content-Length": fileSize.toString(),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000",
       },
