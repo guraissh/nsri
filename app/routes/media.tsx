@@ -76,14 +76,18 @@ export default function Media() {
 		const endIndex = Math.min(currentIndex + 4, allMediaItems.length);
 		console.log(`Updating videos for current index: ${currentIndex}, loading up to index: ${endIndex} out of ${allMediaItems.length}`);
 		const itemsToLoad = allMediaItems.slice(0, endIndex);
-		setVideos(itemsToLoad.map((item) => ({
-			id: item.id,
-			src: item.url,
-			controls: true,
-			autoPlay: true,
-			muted: true,
-			playsInline: true,
-		})));
+		setVideos(itemsToLoad.map((item, localIdx) => {
+			const globalIdx = localIdx; // Since we slice from 0
+			return {
+				id: item.id,
+				src: item.url,
+				controls: true,
+				autoPlay: globalIdx === currentIndex,
+				muted: true,
+				playsInline: true,
+				preload: globalIdx === currentIndex ? 'metadata' : 'none',
+			};
+		}));
 	}, [currentIndex, allMediaItems]);
 
 	const markMediaAsError = useCallback((index: number) => {
