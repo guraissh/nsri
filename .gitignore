@@ -6,3 +6,7 @@
 /.react-router/
 /build/
 *_cookies.txt
+
+# Generated
+file-cache.db
+public/thumbnails

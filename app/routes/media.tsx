@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLoaderData, useNavigate } from "react-router";
-import '@vidstack/react/player/styles/default/theme.css';
-import '@vidstack/react/player/styles/default/layouts/video.css';
+import "@vidstack/react/player/styles/default/theme.css";
+import "@vidstack/react/player/styles/default/layouts/video.css";
 import type { Route } from "./+types/media";
-import { ArrowUpDown, Download } from 'lucide-react';
+import { ArrowUpDown, Download, Folder } from "lucide-react";
 import { VerticalFeed, type VideoItem } from "~/VerticalFeed";
+import { FolderBrowser } from "~/FolderBrowser";
 
 interface MediaItem {
   url: string;
-  type: 'video' | 'image';
+  type: "video" | "image";
   id: string;
   hasError?: boolean;
 }
@@ -32,28 +33,50 @@ export async function loader({ request }: Route.LoaderArgs) {
   return params;
 }
 
-const getMediaType = (url: string): 'video' | 'image' => {
-  const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.flv', '.ogv'];
-  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.tiff'];
+const getMediaType = (url: string): "video" | "image" => {
+  const videoExtensions = [
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".m4v",
+    ".3gp",
+    ".flv",
+    ".ogv",
+  ];
+  const imageExtensions = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".svg",
+    ".tiff",
+  ];
 
   const lowerUrl = url.toLowerCase();
 
-  if (videoExtensions.some(ext => lowerUrl.includes(ext))) {
-    return 'video';
+  if (videoExtensions.some((ext) => lowerUrl.includes(ext))) {
+    return "video";
   }
-  if (imageExtensions.some(ext => lowerUrl.includes(ext))) {
-    return 'image';
+  if (imageExtensions.some((ext) => lowerUrl.includes(ext))) {
+    return "image";
   }
 
   // Try to determine from URL structure
-  if (lowerUrl.includes('video') || lowerUrl.includes('.m3u8') || lowerUrl.includes('stream')) {
-    return 'video';
+  if (
+    lowerUrl.includes("video") ||
+    lowerUrl.includes(".m3u8") ||
+    lowerUrl.includes("stream")
+  ) {
+    return "video";
   }
 
   // Default to image for unknown types (safer fallback)
-  return 'image';
+  return "image";
 };
-
 
 export default function Media() {
   const params = useLoaderData<typeof loader>();
@@ -66,28 +89,40 @@ export default function Media() {
 
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const navigate = useNavigate();
+  const windowOffsetRef = useRef(0); // Track where the sliding window starts
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
 
-
-  // Load more videos as user scrolls
+  // Load more videos as user scrolls - using sliding window to prevent memory bloat
   useEffect(() => {
     if (allMediaItems.length === 0) return;
 
-    // Load current video + 3 ahead
-    const endIndex = Math.min(currentIndex + 4, allMediaItems.length);
-    console.log(`Updating videos for current index: ${currentIndex}, loading up to index: ${endIndex} out of ${allMediaItems.length}`);
-    const itemsToLoad = allMediaItems.slice(0, endIndex);
-    setVideos(itemsToLoad.map((item, localIdx) => {
-      const globalIdx = localIdx; // Since we slice from 0
-      return {
-        id: item.id,
-        src: item.url,
-        controls: true,
-        autoPlay: globalIdx === currentIndex,
-        muted: true,
-        playsInline: true,
-        preload: globalIdx === currentIndex ? 'metadata' : 'none',
-      };
-    }));
+    // Sliding window: load 2 before + current + 3 ahead
+    const windowSize = 6;
+    const startIndex = Math.max(0, currentIndex - 2);
+    const endIndex = Math.min(startIndex + windowSize, allMediaItems.length);
+
+    // Store the window offset so we can calculate global indices
+    windowOffsetRef.current = startIndex;
+
+    console.log(
+      `Updating videos for current index: ${currentIndex}, loading window [${startIndex}, ${endIndex}) out of ${allMediaItems.length}`,
+    );
+
+    const itemsToLoad = allMediaItems.slice(startIndex, endIndex);
+    setVideos(
+      itemsToLoad.map((item, localIdx) => {
+        const globalIdx = startIndex + localIdx;
+        return {
+          id: item.id,
+          src: item.url,
+          controls: true,
+          autoPlay: globalIdx === currentIndex,
+          muted: true,
+          playsInline: true,
+          preload: globalIdx === currentIndex ? "metadata" : "none",
+        };
+      }),
+    );
   }, [currentIndex, allMediaItems]);
 
   // Clean up video resources when component unmounts or tab is hidden
@@ -95,13 +130,13 @@ export default function Media() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         // Tab is hidden - pause all videos and clear buffers
-        console.log('Tab hidden, cleaning up video resources');
-        const videoElements = document.querySelectorAll('video');
-        videoElements.forEach(video => {
+        console.log("Tab hidden, cleaning up video resources");
+        const videoElements = document.querySelectorAll("video");
+        videoElements.forEach((video) => {
           video.pause();
           // Remove src to free memory
           const currentSrc = video.src;
-          video.removeAttribute('src');
+          video.removeAttribute("src");
           video.load(); // This frees the buffer
           // Store src for potential restoration
           video.dataset.pausedSrc = currentSrc;
@@ -111,35 +146,29 @@ export default function Media() {
 
     const handleBeforeUnload = () => {
       // Clean up before page unload
-      const videoElements = document.querySelectorAll('video');
-      videoElements.forEach(video => {
+      const videoElements = document.querySelectorAll("video");
+      videoElements.forEach((video) => {
         video.pause();
-        video.removeAttribute('src');
+        video.removeAttribute("src");
         video.load();
       });
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
 
-      // Also cleanup on component unmount
-      const videoElements = document.querySelectorAll('video');
-      videoElements.forEach(video => {
+      // Cleanup on component unmount
+      const videoElements = document.querySelectorAll("video");
+      videoElements.forEach((video) => {
         video.pause();
-        video.removeAttribute('src');
+        video.removeAttribute("src");
         video.load();
       });
     };
-  }, []);
-
-  const markMediaAsError = useCallback((index: number) => {
-    setVideos(prev => prev.map((item, i) =>
-      i === index ? { ...item, hasError: true } : item
-    ));
   }, []);
 
   const startMediaStream = async () => {
@@ -179,15 +208,14 @@ export default function Media() {
         .map((url: string, index: number) => ({
           url,
           type: getMediaType(url),
-          id: `${Date.now()}-${index}`
+          id: `${Date.now()}-${index}`,
         }))
-        .filter((item: MediaItem) => item.type === 'video');
+        .filter((item: MediaItem) => item.type === "video");
 
       console.log("Fetched video items:", allItems.length);
 
       // Store all video items, the useEffect will handle loading the first 4
       setAllMediaItems(allItems);
-
     } catch (error) {
       console.error("Error fetching media:", error);
     } finally {
@@ -195,22 +223,64 @@ export default function Media() {
     }
   };
 
+  const handleEndReached = () => {
+    console.log("End reached");
+  };
 
+  const handleItemVisible = (_: VideoItem, localIndex: number) => {
+    // Convert local index to global index
+    const globalIndex = windowOffsetRef.current + localIndex;
+    console.log(`Item visible at local index: ${localIndex}, global index: ${globalIndex}`);
+    setCurrentIndex(globalIndex);
+  };
+
+  const handleItemHidden = useCallback(
+    (_: VideoItem, localIndex: number) => {
+      const globalIndex = windowOffsetRef.current + localIndex;
+      console.log(`Item hidden at local index: ${localIndex}, global index: ${globalIndex}`);
+      // The sliding window will handle memory management by removing videos from the DOM
+      // No need for aggressive cleanup here as it causes request cancellations
+    },
+    [],
+  );
+
+  const handleDownload = (item: VideoItem) => {
+    const link = document.createElement("a");
+    link.href = item.src;
+    link.download = item.src.split("/").pop() || "video";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   if (!hasStarted) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
         <div className="max-w-md w-full space-y-6 text-center">
-          <h1 className="text-3xl font-bold text-white mb-6">TikTok-like Media Viewer</h1>
+          <h1 className="text-3xl font-bold text-white mb-6">
+            TikTok-like Media Viewer
+          </h1>
 
           <div className="bg-gray-900 p-4 rounded-lg text-left">
-            <h2 className="text-lg font-semibold mb-2 text-white">Parameters:</h2>
+            <h2 className="text-lg font-semibold mb-2 text-white">
+              Parameters:
+            </h2>
             <div className="space-y-1 text-gray-300 text-sm">
-              <p><strong>Domain:</strong> {params.baseDomain}</p>
-              <p><strong>Service:</strong> {params.serviceName}</p>
-              <p><strong>User ID:</strong> {params.userId}</p>
-              <p><strong>Range:</strong> {params.from} - {params.to}</p>
-              <p><strong>Limit:</strong> {params.limit}</p>
+              <p>
+                <strong>Domain:</strong> {params.baseDomain}
+              </p>
+              <p>
+                <strong>Service:</strong> {params.serviceName}
+              </p>
+              <p>
+                <strong>User ID:</strong> {params.userId}
+              </p>
+              <p>
+                <strong>Range:</strong> {params.from} - {params.to}
+              </p>
+              <p>
+                <strong>Limit:</strong> {params.limit}
+              </p>
             </div>
           </div>
 
@@ -226,118 +296,124 @@ export default function Media() {
     );
   }
 
-
-  const handleEndReached = () => {
-    console.log('End reached');
-  };
-
-
-
-  const handleItemVisible = (_: VideoItem, index: number) => {
-    console.log('Item visible at index:', index);
-    setCurrentIndex(index);
-  };
-
-  const handleItemHidden = (_: VideoItem, index: number) => {
-    console.log('Item hidden at index:', index);
-    // Clean up the video element for hidden items after a delay
-    setTimeout(() => {
-      const videoElements = document.querySelectorAll('video');
-      if (videoElements[index]) {
-        const video = videoElements[index];
-        video.pause();
-        // Only clear if it's far from current index (more than 2 away)
-        if (Math.abs(index - currentIndex) > 2) {
-          const currentSrc = video.src;
-          video.removeAttribute('src');
-          video.load();
-          console.log(`Freed memory for video at index ${index}`);
-        }
-      }
-    }, 1000); // Delay to avoid thrashing during fast scrolling
-  };
-
-  const handleDownload = (item: VideoItem) => {
-    const link = document.createElement('a');
-    link.href = item.src;
-    link.download = item.src.split('/').pop() || 'video';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const handleCycleSortOrder = () => {
     const currentSort = params.sortBy;
-    let nextSort = 'duration-desc';
+    let nextSort = "duration-desc";
 
-    if (currentSort === 'duration-desc') {
-      nextSort = 'duration-asc';
-    } else if (currentSort === 'duration-asc') {
-      nextSort = 'none';
+    if (currentSort === "duration-desc") {
+      nextSort = "duration-asc";
+    } else if (currentSort === "duration-asc") {
+      nextSort = "none";
     }
 
     // Navigate to the same page with updated sort parameter
     const searchParams = new URLSearchParams(window.location.search);
-    searchParams.set('sortBy', nextSort);
+    searchParams.set("sortBy", nextSort);
     navigate(`/media?${searchParams.toString()}`);
   };
 
   const getSortLabel = () => {
     switch (params.sortBy) {
-      case 'duration-desc':
-        return 'Longest';
-      case 'duration-asc':
-        return 'Shortest';
-      case 'none':
+      case "duration-desc":
+        return "Longest";
+      case "duration-asc":
+        return "Shortest";
+      case "none":
       default:
-        return 'Default';
+        return "Default";
     }
+  };
+
+  const handleSelectFolder = (path: string) => {
+    setShowFolderBrowser(false);
+    // Navigate to media page with new directory path
+    const searchParams = new URLSearchParams();
+    searchParams.set("sourceType", "local");
+    searchParams.set("directoryPath", path);
+    navigate(`/media?${searchParams.toString()}`);
+    // Reload page to fetch new media
+    window.location.reload();
   };
 
   const renderVideoOverlay = (item: VideoItem, index: number) => {
     return (
       <div
         style={{
-          position: 'absolute',
-          right: '20px',
-          bottom: '100px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '12px',
+          position: "absolute",
+          right: "20px",
+          bottom: "100px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "12px",
           zIndex: 10,
         }}
       >
+        {/* Folder Browser Button */}
+        {params.sourceType === "local" && (
+          <div
+            style={{
+              background: "rgba(0, 0, 0, 0.6)",
+              borderRadius: "12px",
+              padding: "8px",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowFolderBrowser(true);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "8px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <Folder size={28} color="white" />
+              <span
+                style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+              >
+                Browse
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Sort Button */}
         <div
           style={{
-            background: 'rgba(0, 0, 0, 0.6)',
-            borderRadius: '12px',
-            padding: '8px',
-            backdropFilter: 'blur(4px)',
+            background: "rgba(0, 0, 0, 0.6)",
+            borderRadius: "12px",
+            padding: "8px",
+            backdropFilter: "blur(4px)",
           }}
         >
           <button
-            onClick={e => {
+            onClick={(e) => {
               e.stopPropagation();
               handleCycleSortOrder();
             }}
             style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '4px',
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
             }}
           >
-            <ArrowUpDown
-              size={28}
-              color="white"
-            />
-            <span style={{ color: 'white', fontSize: '12px', fontWeight: '500' }}>
+            <ArrowUpDown size={28} color="white" />
+            <span
+              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+            >
               {getSortLabel()}
             </span>
           </button>
@@ -346,33 +422,32 @@ export default function Media() {
         {/* Download Button */}
         <div
           style={{
-            background: 'rgba(0, 0, 0, 0.6)',
-            borderRadius: '12px',
-            padding: '8px',
-            backdropFilter: 'blur(4px)',
+            background: "rgba(0, 0, 0, 0.6)",
+            borderRadius: "12px",
+            padding: "8px",
+            backdropFilter: "blur(4px)",
           }}
         >
           <button
-            onClick={e => {
+            onClick={(e) => {
               e.stopPropagation();
               handleDownload(item);
             }}
             style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '4px',
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
             }}
           >
-            <Download
-              size={28}
-              color="white"
-            />
-            <span style={{ color: 'white', fontSize: '12px', fontWeight: '500' }}>
+            <Download size={28} color="white" />
+            <span
+              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+            >
               Download
             </span>
           </button>
@@ -382,18 +457,46 @@ export default function Media() {
   };
 
   return (
-    <div style={{ height: '100vh', width: '100vw' }} className="w-full h-screen">
-      <VerticalFeed
-        items={videos}
-        onEndReached={handleEndReached}
-        onItemVisible={handleItemVisible}
-        onItemHidden={handleItemHidden}
-        className="h-100vh"
-        style={{ maxHeight: '100dvh' }}
-        renderItemOverlay={renderVideoOverlay}
-        noCover={true}
-      />
-    </div>
+    <>
+      <div
+        style={{ height: "100vh", width: "100vw" }}
+        className="w-full h-screen"
+      >
+        <VerticalFeed
+          items={videos}
+          onEndReached={handleEndReached}
+          onItemVisible={handleItemVisible}
+          onItemHidden={handleItemHidden}
+          className="h-100vh"
+          style={{ maxHeight: "100dvh" }}
+          renderItemOverlay={renderVideoOverlay}
+          noCover={true}
+        />
+      </div>
+
+      {/* Folder Browser Modal */}
+      {showFolderBrowser && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.95)",
+            zIndex: 9999,
+            overflowY: "auto",
+          }}
+          onClick={() => setShowFolderBrowser(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <FolderBrowser
+              onSelectPath={handleSelectFolder}
+              initialPath={params.directoryPath}
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
-

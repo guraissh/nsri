@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
 
-export function meta({ }: Route.MetaArgs) {
+export function meta({}: Route.MetaArgs) {
   return [
     { title: "Media Stream Configuration" },
     { name: "description", content: "Configure and stream media content" },
@@ -73,7 +73,10 @@ export default function Home() {
       navigate(`/media?${params.toString()}`);
     } else {
       // For API source
-      const baseDomain = formData.platform === "kemono" ? "https://kemono.cr" : "https://coomer.su";
+      const baseDomain =
+        formData.platform === "kemono"
+          ? "https://kemono.cr"
+          : "https://coomer.su";
       const baseApiPath = "/api/v1";
 
       const params = new URLSearchParams({
@@ -85,7 +88,9 @@ export default function Home() {
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
@@ -144,7 +149,9 @@ export default function Home() {
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-gray-900 dark:text-white">Media Stream Configuration</h1>
+      <h1 className="text-3xl font-bold mb-6 text-gray-900 dark:text-white">
+        Media Stream Configuration
+      </h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -205,7 +212,8 @@ export default function Home() {
                 className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Set a custom starting directory for the browser (e.g., /mnt, C:\Videos)
+                Set a custom starting directory for the browser (e.g., /mnt,
+                C:\Videos)
               </p>
             </div>
 
@@ -346,15 +354,21 @@ export default function Home() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Select Directory</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                Select Directory
+              </h2>
             </div>
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6">
               {browserLoading ? (
-                <div className="text-center py-8 text-gray-900 dark:text-white">Loading...</div>
+                <div className="text-center py-8 text-gray-900 dark:text-white">
+                  Loading...
+                </div>
               ) : browserError ? (
-                <div className="text-red-600 dark:text-red-400 py-4">{browserError}</div>
+                <div className="text-red-600 dark:text-red-400 py-4">
+                  {browserError}
+                </div>
               ) : (
                 <>
                   {/* Current Path */}
@@ -392,7 +406,9 @@ export default function Home() {
                   {browserData.parentPath && (
                     <button
                       type="button"
-                      onClick={() => handleNavigateToDirectory(browserData.parentPath!)}
+                      onClick={() =>
+                        handleNavigateToDirectory(browserData.parentPath!)
+                      }
                       className="w-full mb-2 px-4 py-2 text-left bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-md flex items-center gap-2 text-gray-900 dark:text-white"
                     >
                       <span>↑</span>
@@ -448,4 +464,3 @@ export default function Home() {
     </div>
   );
 }
-

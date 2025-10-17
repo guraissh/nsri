@@ -8,9 +8,20 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const params = await request.json();
-  const { sourceType, directoryPath, sortBy, baseDomain, baseApiPath, serviceName, userId, from, to, limit } = params;
+  const {
+    sourceType,
+    directoryPath,
+    sortBy,
+    baseDomain,
+    baseApiPath,
+    serviceName,
+    userId,
+    from,
+    to,
+    limit,
+  } = params;
 
-  console.log('Fetching media with params:', params);
+  console.log("Fetching media with params:", params);
 
   try {
     let mediaUrls: string[];
@@ -37,7 +48,7 @@ export async function action({ request }: Route.ActionArgs) {
         userId,
         from,
         to,
-        limit
+        limit,
       );
 
       // Set the session cookie
@@ -45,7 +56,7 @@ export async function action({ request }: Route.ActionArgs) {
 
       // Set additional cookies from the parsed cookie file (with localhost domain)
       for (const cookie of parsedCookies) {
-        const cookieString = `${cookie.name}=${cookie.value}; Domain=localhost; Path=${cookie.path}; ${cookie.expires ? `Expires=${new Date(cookie.expires * 1000).toUTCString()};` : ''}`;
+        const cookieString = `${cookie.name}=${cookie.value}; Domain=localhost; Path=${cookie.path}; ${cookie.expires ? `Expires=${new Date(cookie.expires * 1000).toUTCString()};` : ""}`;
         headers.append("Set-Cookie", cookieString);
       }
     }
@@ -59,4 +70,3 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: errorMessage }, { status: 500 });
   }
 }
-

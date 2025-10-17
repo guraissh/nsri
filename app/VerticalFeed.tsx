@@ -1,4 +1,10 @@
-import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react';
+import React, {
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useState,
+} from "react";
 
 export interface VideoItem {
   preload: string | undefined;
@@ -39,41 +45,55 @@ export const VerticalFeed = ({
   onItemHidden,
   onItemClick,
   threshold = 0.75,
-  scrollBehavior = 'smooth',
+  scrollBehavior = "smooth",
   renderItemOverlay,
   videoStyles,
   noCover,
 }: VerticalFeedProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [loadingStates, setLoadingStates] = useState<Record<number, boolean>>({});
+  const [loadingStates, setLoadingStates] = useState<Record<number, boolean>>(
+    {},
+  );
   const [errorStates, setErrorStates] = useState<Record<number, boolean>>({});
 
   const handleMediaLoad = useCallback((index: number) => {
-    setLoadingStates(prev => ({ ...prev, [index]: false }));
+    setLoadingStates((prev) => ({ ...prev, [index]: false }));
   }, []);
 
   const handleMediaError = useCallback((index: number) => {
-    setErrorStates(prev => ({ ...prev, [index]: true }));
-    setLoadingStates(prev => ({ ...prev, [index]: false }));
+    setErrorStates((prev) => ({ ...prev, [index]: true }));
+    setLoadingStates((prev) => ({ ...prev, [index]: false }));
   }, []);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          const index = parseInt(entry.target.getAttribute('data-index') || '0', 10);
+      (entries) => {
+        entries.forEach((entry) => {
+          const index = parseInt(
+            entry.target.getAttribute("data-index") || "0",
+            10,
+          );
           const item = items[index];
 
           if (entry.isIntersecting) {
-            const video = entry.target.querySelector('video') as HTMLVideoElement;
+            const video = entry.target.querySelector(
+              "video",
+            ) as HTMLVideoElement;
             if (video) {
-              video.play().catch(error => {
-                console.error('Error playing video:', error);
+              // Restore src if it was cleared
+              if (!video.src && item.src) {
+                video.src = item.src;
+                video.load();
+              }
+              video.play().catch((error) => {
+                console.error("Error playing video:", error);
               });
             }
             onItemVisible?.(item, index);
           } else {
-            const video = entry.target.querySelector('video') as HTMLVideoElement;
+            const video = entry.target.querySelector(
+              "video",
+            ) as HTMLVideoElement;
             if (video) {
               video.pause();
             }
@@ -83,13 +103,22 @@ export const VerticalFeed = ({
       },
       {
         threshold,
-      }
+      },
     );
 
-    const mediaElements = containerRef.current?.querySelectorAll('[data-index]') || [];
-    mediaElements.forEach(media => observer.observe(media));
+    const mediaElements =
+      containerRef.current?.querySelectorAll("[data-index]") || [];
+    mediaElements.forEach((media) => observer.observe(media));
 
     return () => {
+      // Clean up all video buffers before disconnecting observer
+      const videoElements =
+        containerRef.current?.querySelectorAll("video") || [];
+      videoElements.forEach((video) => {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      });
       observer.disconnect();
     };
   }, [items, onItemVisible, onItemHidden, threshold]);
@@ -112,13 +141,13 @@ export const VerticalFeed = ({
       if (!containerRef.current.scrollTo) return;
 
       switch (e.key) {
-        case 'ArrowDown':
+        case "ArrowDown":
           containerRef.current.scrollTo({
             top: scrollTop + scrollAmount,
             behavior: scrollBehavior,
           });
           break;
-        case 'ArrowUp':
+        case "ArrowUp":
           containerRef.current.scrollTo({
             top: scrollTop - scrollAmount,
             behavior: scrollBehavior,
@@ -126,7 +155,7 @@ export const VerticalFeed = ({
           break;
       }
     },
-    [scrollBehavior]
+    [scrollBehavior],
   );
 
   const defaultRenderItem = useCallback(
@@ -140,10 +169,10 @@ export const VerticalFeed = ({
           data-index={index}
           onClick={() => onItemClick?.(item, index)}
           style={{
-            height: '100vh',
-            scrollSnapAlign: 'start',
-            position: 'relative',
-            cursor: onItemClick ? 'pointer' : 'default',
+            height: "100vh",
+            scrollSnapAlign: "start",
+            position: "relative",
+            cursor: onItemClick ? "pointer" : "default",
           }}
           role="region"
           aria-label={`video ${index + 1}`}
@@ -158,13 +187,15 @@ export const VerticalFeed = ({
             autoPlay={item.autoPlay ?? true}
             onLoadedData={() => handleMediaLoad(index)}
             onError={() => handleMediaError(index)}
-            preload={item.preload ? item.preload as string | undefined : undefined}
+            preload={
+              item.preload ? (item.preload as string | undefined) : undefined
+            }
             style={{
-              width: '100%',
-              height: '100%',
-              objectFit: noCover ? 'contain' : 'cover',
-              display: isLoading || hasError ? 'none' : 'block',
-              ...videoStyles
+              width: "100%",
+              height: "100%",
+              objectFit: noCover ? "contain" : "cover",
+              display: isLoading || hasError ? "none" : "block",
+              ...videoStyles,
             }}
           />
           {renderItemOverlay && renderItemOverlay(item, index)}
@@ -180,12 +211,12 @@ export const VerticalFeed = ({
       handleMediaError,
       onItemClick,
       renderItemOverlay,
-    ]
+    ],
   );
 
   const mediaElements = useMemo(
     () => items.map((item, index) => defaultRenderItem(item, index)),
-    [items, defaultRenderItem]
+    [items, defaultRenderItem],
   );
 
   return (
@@ -198,10 +229,10 @@ export const VerticalFeed = ({
       aria-label="Vertical video feed"
       className={className}
       style={{
-        height: '100vh',
-        overflowY: 'scroll',
-        scrollSnapType: 'y mandatory',
-        outline: 'none',
+        height: "100vh",
+        overflowY: "scroll",
+        scrollSnapType: "y mandatory",
+        outline: "none",
         ...style,
       }}
     >

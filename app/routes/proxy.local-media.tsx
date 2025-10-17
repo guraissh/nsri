@@ -27,19 +27,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Determine content type based on file extension
     const ext = path.extname(normalizedPath).toLowerCase();
     const contentTypes: Record<string, string> = {
-      '.mp4': 'video/mp4',
-      '.webm': 'video/webm',
-      '.mov': 'video/quicktime',
-      '.avi': 'video/x-msvideo',
-      '.mkv': 'video/x-matroska',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
+      ".mp4": "video/mp4",
+      ".webm": "video/webm",
+      ".mov": "video/quicktime",
+      ".avi": "video/x-msvideo",
+      ".mkv": "video/x-matroska",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
     };
 
-    const contentType = contentTypes[ext] || 'application/octet-stream';
+    const contentType = contentTypes[ext] || "application/octet-stream";
     const fileSize = stats.size;
 
     // Handle range requests for video seeking
@@ -50,27 +50,55 @@ export async function loader({ request }: Route.LoaderArgs) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = (end - start) + 1;
+      const chunkSize = end - start + 1;
 
-      // Create stream for the requested range
-      const fileStream = createReadStream(normalizedPath, { start, end });
+      // Create stream for the requested range with highWaterMark to limit buffering
+      const fileStream = createReadStream(normalizedPath, {
+        start,
+        end,
+        highWaterMark: 64 * 1024 // 64KB chunks to reduce memory usage
+      });
+      let isCancelled = false;
 
-      // Convert Node.js ReadableStream to Web ReadableStream
+      // Convert Node.js ReadableStream to Web ReadableStream with backpressure
       const webStream = new ReadableStream({
         start(controller) {
-          fileStream.on('data', (chunk: Buffer) => {
-            controller.enqueue(new Uint8Array(chunk));
+          fileStream.on("data", (chunk) => {
+            if (isCancelled) return;
+
+            // Pause stream to apply backpressure
+            fileStream.pause();
+            controller.enqueue(Uint8Array.from(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk));
           });
-          fileStream.on('end', () => {
-            controller.close();
+
+          fileStream.on("end", () => {
+            if (!isCancelled) {
+              controller.close();
+            }
           });
-          fileStream.on('error', (error) => {
-            controller.error(error);
+
+          fileStream.on("error", (error) => {
+            if (!isCancelled) {
+              controller.error(error);
+            }
+            fileStream.destroy();
           });
         },
-        cancel() {
+
+        pull(controller) {
+          // Resume reading when browser is ready for more data
+          if (!isCancelled && !fileStream.destroyed) {
+            fileStream.resume();
+          }
+        },
+
+        cancel(reason) {
+          isCancelled = true;
+          console.log(`Stream cancelled for ${normalizedPath}: ${reason}`);
+          fileStream.pause();
           fileStream.destroy();
-        }
+          fileStream.removeAllListeners();
+        },
       });
 
       // Return 206 Partial Content
@@ -86,25 +114,51 @@ export async function loader({ request }: Route.LoaderArgs) {
       });
     }
 
-    // No range request - stream entire file
-    const fileStream = createReadStream(normalizedPath);
+    // No range request - stream entire file with highWaterMark to limit buffering
+    const fileStream = createReadStream(normalizedPath, {
+      highWaterMark: 64 * 1024 // 64KB chunks to reduce memory usage
+    });
+    let isCancelled = false;
 
-    // Convert Node.js ReadableStream to Web ReadableStream
+    // Convert Node.js ReadableStream to Web ReadableStream with backpressure
     const webStream = new ReadableStream({
       start(controller) {
-        fileStream.on('data', (chunk: Buffer) => {
-          controller.enqueue(new Uint8Array(chunk));
+        fileStream.on("data", (chunk) => {
+          if (isCancelled) return;
+
+          // Pause stream to apply backpressure
+          fileStream.pause();
+          controller.enqueue(Uint8Array.from(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk));
         });
-        fileStream.on('end', () => {
-          controller.close();
+
+        fileStream.on("end", () => {
+          if (!isCancelled) {
+            controller.close();
+          }
         });
-        fileStream.on('error', (error) => {
-          controller.error(error);
+
+        fileStream.on("error", (error) => {
+          if (!isCancelled) {
+            controller.error(error);
+          }
+          fileStream.destroy();
         });
       },
-      cancel() {
+
+      pull(controller) {
+        // Resume reading when browser is ready for more data
+        if (!isCancelled && !fileStream.destroyed) {
+          fileStream.resume();
+        }
+      },
+
+      cancel(reason) {
+        isCancelled = true;
+        console.log(`Stream cancelled for ${normalizedPath}: ${reason}`);
+        fileStream.pause();
         fileStream.destroy();
-      }
+        fileStream.removeAllListeners();
+      },
     });
 
     return new Response(webStream, {
@@ -121,4 +175,3 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw new Response(errorMessage, { status: 500 });
   }
 }
-
