@@ -3,7 +3,7 @@ import { useLoaderData, useNavigate } from "react-router";
 import "@vidstack/react/player/styles/default/theme.css";
 import "@vidstack/react/player/styles/default/layouts/video.css";
 import type { Route } from "./+types/media";
-import { ArrowUpDown, Download, Folder } from "lucide-react";
+import { ArrowUpDown, Download, Folder, Volume2, VolumeX } from "lucide-react";
 import { VerticalFeed, type VideoItem } from "~/VerticalFeed";
 import { FolderBrowser } from "~/FolderBrowser";
 
@@ -91,6 +91,7 @@ export default function Media() {
   const navigate = useNavigate();
   const windowOffsetRef = useRef(0); // Track where the sliding window starts
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+  const [isMuted, setIsMuted] = useState(true); // Track audio state across all videos
 
   // Load more videos as user scrolls - using sliding window to prevent memory bloat
   useEffect(() => {
@@ -117,13 +118,21 @@ export default function Media() {
           src: item.url,
           controls: true,
           autoPlay: globalIdx === currentIndex,
-          muted: true,
+          muted: isMuted,
           playsInline: true,
           preload: globalIdx === currentIndex ? "metadata" : "none",
         };
       }),
     );
-  }, [currentIndex, allMediaItems]);
+  }, [currentIndex, allMediaItems, isMuted]);
+
+  // Update muted state on all video elements when isMuted changes
+  useEffect(() => {
+    const videoElements = document.querySelectorAll('video');
+    videoElements.forEach(video => {
+      video.muted = isMuted;
+    });
+  }, [isMuted]);
 
   // Clean up video resources when component unmounts or tab is hidden
   useEffect(() => {
@@ -449,6 +458,44 @@ export default function Media() {
               style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
             >
               Download
+            </span>
+          </button>
+        </div>
+
+        {/* Audio Toggle Button */}
+        <div
+          style={{
+            background: "rgba(0, 0, 0, 0.6)",
+            borderRadius: "12px",
+            padding: "8px",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsMuted(!isMuted);
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            {isMuted ? (
+              <VolumeX size={28} color="white" />
+            ) : (
+              <Volume2 size={28} color="white" />
+            )}
+            <span
+              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+            >
+              {isMuted ? "Unmute" : "Mute"}
             </span>
           </button>
         </div>
