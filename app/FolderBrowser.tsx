@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Folder, ArrowLeft, Play, Clock } from "lucide-react";
+import { Folder, ArrowUp, Play, Clock } from "lucide-react";
 
 interface Directory {
   name: string;
@@ -32,7 +32,7 @@ export function FolderBrowser({ onSelectPath, initialPath }: FolderBrowserProps)
   const [data, setData] = useState<DirectoryData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showFiles, setShowFiles] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
 
   const loadDirectory = async (path: string, includeFiles = false) => {
     setIsLoading(true);
@@ -60,7 +60,7 @@ export function FolderBrowser({ onSelectPath, initialPath }: FolderBrowserProps)
   };
 
   useEffect(() => {
-    loadDirectory(currentPath, showFiles);
+    loadDirectory(currentPath, true);
   }, []);
 
   const handleNavigateToDirectory = (path: string) => {
@@ -86,23 +86,25 @@ export function FolderBrowser({ onSelectPath, initialPath }: FolderBrowserProps)
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold mb-4">Folder Browser</h1>
-
           {/* Current Path */}
           <div className="bg-gray-800 p-4 rounded-lg mb-4">
+
+
             <div className="flex items-center justify-between">
+              {data?.parentPath && (
+                <button
+                  onClick={() => handleNavigateToDirectory(data.parentPath!)}
+                  className="mr-4 p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                  title="Go to parent directory"
+                >
+                  <ArrowUp size={20} />
+                </button>
+              )}
+
               <div className="flex-1">
                 <p className="text-sm text-gray-400 mb-1">Current Directory</p>
                 <p className="font-mono text-sm break-all">{currentPath || "Home"}</p>
               </div>
-              {data?.parentPath && (
-                <button
-                  onClick={() => handleNavigateToDirectory(data.parentPath!)}
-                  className="ml-4 p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                  title="Go to parent directory"
-                >
-                  <ArrowLeft size={20} />
-                </button>
-              )}
             </div>
           </div>
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
+import { FolderBrowser } from "~/FolderBrowser";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -13,20 +14,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Get ROOT_DIR from environment variable
   const rootDir = process.env.ROOT_DIR || "";
   return { rootDir };
-}
-
-interface Directory {
-  name: string;
-  path: string;
-}
-
-interface DirectoryListResponse {
-  currentPath: string;
-  parentPath: string | null;
-  directories: Directory[];
-  drives: string[];
-  platform: string;
-  error?: string;
 }
 
 export default function Home() {
@@ -49,15 +36,6 @@ export default function Home() {
   // Directory browser state
   const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
   const [browserStartPath, setBrowserStartPath] = useState("");
-  const [browserData, setBrowserData] = useState<DirectoryListResponse>({
-    currentPath: "",
-    parentPath: null,
-    directories: [],
-    drives: [],
-    platform: "",
-  });
-  const [browserLoading, setBrowserLoading] = useState(false);
-  const [browserError, setBrowserError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,51 +76,14 @@ export default function Home() {
   };
 
   // Directory browser functions
-  const fetchDirectories = async (path: string = "") => {
-    setBrowserLoading(true);
-    setBrowserError(null);
-
-    try {
-      const response = await fetch("/api/list-directories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPath: path }),
-      });
-
-      const data: DirectoryListResponse = await response.json();
-
-      if (data.error) {
-        setBrowserError(data.error);
-      } else {
-        setBrowserData(data);
-      }
-    } catch (error) {
-      console.error("Error fetching directories:", error);
-      setBrowserError("Failed to fetch directories");
-    } finally {
-      setBrowserLoading(false);
-    }
-  };
-
   const handleOpenBrowser = () => {
     setShowDirectoryBrowser(true);
-    // Use browserStartPath if set, otherwise try formData.directoryPath, otherwise empty (home dir)
-    const startPath = browserStartPath || formData.directoryPath || "";
-    fetchDirectories(startPath);
   };
 
-  const handleCloseBrowser = () => {
-    setShowDirectoryBrowser(false);
-  };
-
-  const handleNavigateToDirectory = (path: string) => {
-    fetchDirectories(path);
-  };
-
-  const handleSelectDirectory = () => {
+  const handleSelectDirectory = (path: string) => {
     setFormData({
       ...formData,
-      directoryPath: browserData.currentPath,
+      directoryPath: path,
     });
     setShowDirectoryBrowser(false);
   };
@@ -350,114 +291,15 @@ export default function Home() {
 
       {/* Directory Browser Modal */}
       {showDirectoryBrowser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                Select Directory
-              </h2>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {browserLoading ? (
-                <div className="text-center py-8 text-gray-900 dark:text-white">
-                  Loading...
-                </div>
-              ) : browserError ? (
-                <div className="text-red-600 dark:text-red-400 py-4">
-                  {browserError}
-                </div>
-              ) : (
-                <>
-                  {/* Current Path */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Current Path:
-                    </label>
-                    <div className="px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-mono break-all text-gray-900 dark:text-white">
-                      {browserData.currentPath || "(Home Directory)"}
-                    </div>
-                  </div>
-
-                  {/* Drives (Windows only) */}
-                  {browserData.drives && browserData.drives.length > 0 && (
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Drives:
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {browserData.drives.map((drive) => (
-                          <button
-                            key={drive}
-                            type="button"
-                            onClick={() => handleNavigateToDirectory(drive)}
-                            className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 text-sm font-medium"
-                          >
-                            {drive}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Parent Directory Button */}
-                  {browserData.parentPath && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleNavigateToDirectory(browserData.parentPath!)
-                      }
-                      className="w-full mb-2 px-4 py-2 text-left bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-md flex items-center gap-2 text-gray-900 dark:text-white"
-                    >
-                      <span>↑</span>
-                      <span>.. (Parent Directory)</span>
-                    </button>
-                  )}
-
-                  {/* Directory List */}
-                  <div className="space-y-1">
-                    {browserData.directories.length === 0 ? (
-                      <div className="text-gray-500 dark:text-gray-400 py-4 text-center">
-                        No subdirectories found
-                      </div>
-                    ) : (
-                      browserData.directories.map((dir) => (
-                        <button
-                          key={dir.path}
-                          type="button"
-                          onClick={() => handleNavigateToDirectory(dir.path)}
-                          className="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md flex items-center gap-2 text-gray-900 dark:text-white"
-                        >
-                          <span>📁</span>
-                          <span className="truncate">{dir.name}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleCloseBrowser}
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSelectDirectory}
-                disabled={!browserData.currentPath}
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed"
-              >
-                Select This Directory
-              </button>
-            </div>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-95 z-50 overflow-y-auto"
+          onClick={() => setShowDirectoryBrowser(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <FolderBrowser
+              onSelectPath={handleSelectDirectory}
+              initialPath={browserStartPath || formData.directoryPath}
+            />
           </div>
         </div>
       )}
