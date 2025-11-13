@@ -16,5 +16,15 @@ body {
 
 video {
   max-height: 100vh!important;
-}
 
+}
+vide::-internal-media-controls-button-panel{
+
+	background: none;
+}
+video::-webkit-media-controls-panel{
+	background: none;
+}
+video::-webkit-media-controls{
+	background: none;
+}
