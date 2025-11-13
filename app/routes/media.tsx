@@ -3,7 +3,7 @@ import { useLoaderData, useNavigate } from "react-router";
 import "@vidstack/react/player/styles/default/theme.css";
 import "@vidstack/react/player/styles/default/layouts/video.css";
 import type { Route } from "./+types/media";
-import { ArrowUpDown, Download, Folder, Volume2, VolumeX } from "lucide-react";
+import { ArrowUpDown, Download, Folder, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
 import { VerticalFeed, type VideoItem } from "~/VerticalFeed";
 import { FolderBrowser } from "~/FolderBrowser";
 
@@ -92,6 +92,7 @@ export default function Media() {
   const windowOffsetRef = useRef(0); // Track where the sliding window starts
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [isMuted, setIsMuted] = useState(true); // Track audio state across all videos
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Load more videos as user scrolls - using sliding window to prevent memory bloat
   useEffect(() => {
@@ -261,6 +262,77 @@ export default function Media() {
     link.click();
     document.body.removeChild(link);
   };
+
+  const handleFullscreenToggle = async () => {
+    try {
+      if (!isFullscreen) {
+        // Enter fullscreen
+        const elem = document.documentElement;
+
+        // Try different fullscreen methods for cross-browser compatibility
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if ((elem as any).webkitRequestFullscreen) {
+          // Safari
+          await (elem as any).webkitRequestFullscreen();
+        } else if ((elem as any).mozRequestFullScreen) {
+          // Firefox
+          await (elem as any).mozRequestFullScreen();
+        } else if ((elem as any).msRequestFullscreen) {
+          // IE11
+          await (elem as any).msRequestFullscreen();
+        }
+
+        // On iOS Safari, try to make the video element fullscreen
+        const videoElement = document.querySelector('video');
+        if (videoElement && (videoElement as any).webkitEnterFullscreen) {
+          (videoElement as any).webkitEnterFullscreen();
+        }
+
+        setIsFullscreen(true);
+      } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          await (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          await (document as any).msExitFullscreen();
+        }
+
+        setIsFullscreen(false);
+      }
+    } catch (error) {
+      console.error('Fullscreen toggle error:', error);
+    }
+  };
+
+  // Listen for fullscreen changes to update state
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isCurrentlyFullscreen);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
 
   if (!hasStarted) {
     return (
@@ -496,6 +568,44 @@ export default function Media() {
               style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
             >
               {isMuted ? "Unmute" : "Mute"}
+            </span>
+          </button>
+        </div>
+
+        {/* Fullscreen Toggle Button */}
+        <div
+          style={{
+            background: "rgba(0, 0, 0, 0.6)",
+            borderRadius: "12px",
+            padding: "8px",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleFullscreenToggle();
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
+            }}
+          >
+            {isFullscreen ? (
+              <Minimize size={28} color="white" />
+            ) : (
+              <Maximize size={28} color="white" />
+            )}
+            <span
+              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+            >
+              {isFullscreen ? "Exit" : "Fullscreen"}
             </span>
           </button>
         </div>
