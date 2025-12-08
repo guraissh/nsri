@@ -17,6 +17,16 @@ interface FileRecord {
   thumbnail_path: string | null;
 }
 
+interface HistoryEntry {
+  id?: number;
+  type: "directory" | "user";
+  value: string;
+  platform?: string;
+  service?: string;
+  last_used: number;
+  use_count: number;
+}
+
 class FileCache {
   private db: Database;
 
@@ -58,6 +68,25 @@ class FileCache {
     } catch {
       // Column already exists
     }
+
+    // Create history table for tracking recently used directories and users
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        value TEXT NOT NULL,
+        platform TEXT,
+        service TEXT,
+        last_used INTEGER DEFAULT (strftime('%s', 'now')),
+        use_count INTEGER DEFAULT 1,
+        UNIQUE(type, value, platform, service)
+      )
+    `);
+
+    // Create index on type for fast lookups
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)
+    `);
 
     console.log("File cache database initialized");
   }
@@ -157,6 +186,34 @@ class FileCache {
 
       if (proc.exitCode === 0 && existsSync(thumbnailPath)) {
         return `/thumbnails/${hash}.jpg`;
+      } else {
+        const res = Bun.spawn([
+          "ffmpeg",
+          "-i", filePath,
+          "-ss", "2",
+          "-vframes", "1",
+          "-vf", "scale=320:-1",
+          "-q:v", "2",
+          thumbnailPath
+        ], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        await res.exited;
+        if (res.exitCode !== 0 && !existsSync(thumbnailPath)) {
+          await Bun.spawn([
+            "ffmpeg",
+            "-i", filePath,
+            "-ss", "1",
+            "-vframes", "1",
+            "-vf", "scale=320:-1",
+            "-q:v", "2",
+            thumbnailPath
+          ], {
+            stdout: "pipe",
+            stderr: "pipe",
+          }).exited;
+        }
       }
 
       return null;
@@ -164,6 +221,18 @@ class FileCache {
       console.warn(`Failed to generate thumbnail for ${path.basename(filePath)}:`, err);
       return null;
     }
+  }
+
+  /**
+   * Get cached record without processing (fast lookup)
+   * Returns null if not in cache or file has changed
+   */
+  getCachedRecord(filePath: string): FileRecord | null {
+    const normalizedPath = path.resolve(filePath);
+    const query = this.db.query<FileRecord, [string]>(
+      "SELECT * FROM files WHERE path = ?"
+    );
+    return query.get(normalizedPath) || null;
   }
 
   /**
@@ -180,8 +249,19 @@ class FileCache {
     );
     const existing = query.get(normalizedPath);
 
-    // If file hasn't changed, return cached record
+    // If file hasn't changed, check if we need to generate a missing thumbnail
     if (existing && existing.mtime === mtimeMs && existing.size === stats.size) {
+      // Generate thumbnail if missing
+      if (!existing.thumbnail_path) {
+        const thumbnailPath = await this.generateThumbnail(normalizedPath, existing.hash);
+        if (thumbnailPath) {
+          this.db.run(
+            `UPDATE files SET thumbnail_path = ? WHERE path = ?`,
+            [thumbnailPath, normalizedPath]
+          );
+          existing.thumbnail_path = thumbnailPath;
+        }
+      }
       return existing;
     }
 
@@ -324,6 +404,109 @@ class FileCache {
     };
   }
 
+  // ============ History Methods ============
+
+  /**
+   * Add or update a directory in history
+   */
+  addDirectoryToHistory(directoryPath: string): void {
+    const normalizedPath = path.resolve(directoryPath);
+    this.db.run(
+      `INSERT INTO history (type, value, last_used, use_count)
+       VALUES ('directory', ?, strftime('%s', 'now'), 1)
+       ON CONFLICT(type, value, platform, service) DO UPDATE SET
+         last_used = strftime('%s', 'now'),
+         use_count = use_count + 1`,
+      [normalizedPath]
+    );
+  }
+
+  /**
+   * Add or update a user in history
+   */
+  addUserToHistory(userId: string, platform: string, service: string): void {
+    this.db.run(
+      `INSERT INTO history (type, value, platform, service, last_used, use_count)
+       VALUES ('user', ?, ?, ?, strftime('%s', 'now'), 1)
+       ON CONFLICT(type, value, platform, service) DO UPDATE SET
+         last_used = strftime('%s', 'now'),
+         use_count = use_count + 1`,
+      [userId, platform, service]
+    );
+  }
+
+  /**
+   * Get recent directories from history
+   */
+  getRecentDirectories(limit: number = 10): HistoryEntry[] {
+    const query = this.db.query<HistoryEntry, [number]>(
+      `SELECT * FROM history
+       WHERE type = 'directory'
+       ORDER BY last_used DESC
+       LIMIT ?`
+    );
+    return query.all(limit);
+  }
+
+  /**
+   * Get recent users from history
+   */
+  getRecentUsers(limit: number = 10, platform?: string, service?: string): HistoryEntry[] {
+    if (platform && service) {
+      const query = this.db.query<HistoryEntry, [string, string, number]>(
+        `SELECT * FROM history
+         WHERE type = 'user' AND platform = ? AND service = ?
+         ORDER BY last_used DESC
+         LIMIT ?`
+      );
+      return query.all(platform, service, limit);
+    } else if (platform) {
+      const query = this.db.query<HistoryEntry, [string, number]>(
+        `SELECT * FROM history
+         WHERE type = 'user' AND platform = ?
+         ORDER BY last_used DESC
+         LIMIT ?`
+      );
+      return query.all(platform, limit);
+    } else {
+      const query = this.db.query<HistoryEntry, [number]>(
+        `SELECT * FROM history
+         WHERE type = 'user'
+         ORDER BY last_used DESC
+         LIMIT ?`
+      );
+      return query.all(limit);
+    }
+  }
+
+  /**
+   * Get all history entries
+   */
+  getAllHistory(): { directories: HistoryEntry[]; users: HistoryEntry[] } {
+    return {
+      directories: this.getRecentDirectories(50),
+      users: this.getRecentUsers(50),
+    };
+  }
+
+  /**
+   * Delete a history entry
+   */
+  deleteHistoryEntry(id: number): void {
+    this.db.run(`DELETE FROM history WHERE id = ?`, [id]);
+  }
+
+  /**
+   * Clear all history
+   */
+  clearHistory(type?: "directory" | "user"): void {
+    if (type) {
+      this.db.run(`DELETE FROM history WHERE type = ?`, [type]);
+    } else {
+      this.db.run(`DELETE FROM history`);
+    }
+  }
+
   /**
    * Close database connection
    */
@@ -343,4 +526,4 @@ export function getFileCache(): FileCache {
 }
 
 export { FileCache };
-export type { FileRecord };
+export type { FileRecord, HistoryEntry };

@@ -65,6 +65,9 @@ export const VerticalFeed = ({
     setLoadingStates((prev) => ({ ...prev, [index]: false }));
   }, []);
 
+  // Track which indices are currently visible
+  const visibleIndicesRef = useRef<Set<number>>(new Set());
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -74,26 +77,28 @@ export const VerticalFeed = ({
             10,
           );
           const item = items[index];
+          const video = entry.target.querySelector("video") as HTMLVideoElement;
 
           if (entry.isIntersecting) {
-            const video = entry.target.querySelector(
-              "video",
-            ) as HTMLVideoElement;
+            visibleIndicesRef.current.add(index);
+
             if (video) {
               // Restore src if it was cleared
-              if (!video.src && item.src) {
+              if (!video.src && item?.src) {
                 video.src = item.src;
                 video.load();
               }
-              video.play().catch((error) => {
-                console.error("Error playing video:", error);
-              });
+              // Only play if video has a source
+              if (video.src) {
+                video.play().catch((error) => {
+                  console.error("Error playing video:", error);
+                });
+              }
             }
             onItemVisible?.(item, index);
           } else {
-            const video = entry.target.querySelector(
-              "video",
-            ) as HTMLVideoElement;
+            visibleIndicesRef.current.delete(index);
+
             if (video) {
               video.pause();
             }
@@ -169,10 +174,12 @@ export const VerticalFeed = ({
           data-index={index}
           onClick={() => onItemClick?.(item, index)}
           style={{
-            height: "100vh",
+            height: "100dvh",
+            maxHeight: "-webkit-fill-available",
             scrollSnapAlign: "start",
             position: "relative",
             cursor: onItemClick ? "pointer" : "default",
+            overflow: "hidden",
           }}
           role="region"
           aria-label={`video ${index + 1}`}
@@ -180,12 +187,19 @@ export const VerticalFeed = ({
           {isLoading && loadingComponent}
           {hasError && errorComponent}
           <video
+            data-video-index={index}
             src={item.src}
             muted={item.muted ?? true}
             playsInline={item.playsInline ?? true}
             controls={item.controls ?? false}
             autoPlay={item.autoPlay ?? true}
             onLoadedData={() => handleMediaLoad(index)}
+            onCanPlay={(e) => {
+              // Auto-play when video is ready and visible
+              if (visibleIndicesRef.current.has(index)) {
+                (e.target as HTMLVideoElement).play().catch(() => {});
+              }
+            }}
             onError={() => handleMediaError(index)}
             preload={
               item.preload ? (item.preload as string | undefined) : undefined
@@ -193,8 +207,12 @@ export const VerticalFeed = ({
             style={{
               width: "100%",
               height: "100%",
+              maxHeight: "100%",
               objectFit: noCover ? "contain" : "cover",
               display: isLoading || hasError ? "none" : "block",
+              // Ensure controls are visible in landscape by adding safe area padding
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
+              boxSizing: "border-box",
               ...videoStyles,
             }}
           />
@@ -229,10 +247,12 @@ export const VerticalFeed = ({
       aria-label="Vertical video feed"
       className={className}
       style={{
-        height: "100vh",
+        height: "100dvh",
+        maxHeight: "-webkit-fill-available",
         overflowY: "scroll",
         scrollSnapType: "y mandatory",
         outline: "none",
+        WebkitOverflowScrolling: "touch",
         ...style,
       }}
     >

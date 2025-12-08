@@ -5,6 +5,7 @@ export default [
   route("media", "routes/media.tsx"),
   route("api/stream-media", "routes/api.stream-media.tsx"),
   route("api/list-directories", "routes/api.list-directories.tsx"),
+  route("api/history", "routes/api.history.tsx"),
   route("proxy/media", "routes/proxy.media.tsx"),
   route("proxy/local-media", "routes/proxy.local-media.tsx"),
 ] satisfies RouteConfig;

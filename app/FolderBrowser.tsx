@@ -173,7 +173,12 @@ export function FolderBrowser({ onSelectPath, initialPath }: FolderBrowserProps)
                   Videos ({data.files.length})
                 </h2>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {data.files.map((file) => (
+                  {data.files.sort(function (a, b) {
+                    return a.name.localeCompare(b.name, undefined, {
+                      numeric: true,
+                      sensitivity: 'base'
+                    });
+                  }).map((file) => (
                     <div
                       key={file.path}
                       className="bg-gray-800 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all"

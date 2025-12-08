@@ -82,50 +82,72 @@ export default function Media() {
   const params = useLoaderData<typeof loader>();
   const [allMediaItems, setAllMediaItems] = useState<MediaItem[]>([]);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasStarted, setHasStarted] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const navigate = useNavigate();
-  const windowOffsetRef = useRef(0); // Track where the sliding window starts
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingIndexRef = useRef<number | null>(null);
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [isMuted, setIsMuted] = useState(true); // Track audio state across all videos
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load more videos as user scrolls - using sliding window to prevent memory bloat
+  // Initialize videos array when media items are loaded
   useEffect(() => {
     if (allMediaItems.length === 0) return;
 
-    // Sliding window: load 2 before + current + 3 ahead
-    const windowSize = 6;
-    const startIndex = Math.max(0, currentIndex - 2);
-    const endIndex = Math.min(startIndex + windowSize, allMediaItems.length);
+    // Only set src for videos within range of current index (1 before, 2 ahead)
+    const loadStart = Math.max(0, currentIndex - 1);
+    const loadEnd = Math.min(allMediaItems.length, currentIndex + 3);
 
-    // Store the window offset so we can calculate global indices
-    windowOffsetRef.current = startIndex;
-
-    console.log(
-      `Updating videos for current index: ${currentIndex}, loading window [${startIndex}, ${endIndex}) out of ${allMediaItems.length}`,
-    );
-
-    const itemsToLoad = allMediaItems.slice(startIndex, endIndex);
     setVideos(
-      itemsToLoad.map((item, localIdx) => {
-        const globalIdx = startIndex + localIdx;
+      allMediaItems.map((item, idx) => {
+        const shouldLoad = idx >= loadStart && idx < loadEnd;
         return {
           id: item.id,
-          src: item.url,
+          src: shouldLoad ? item.url : "",
           controls: true,
-          autoPlay: globalIdx === currentIndex,
+          autoPlay: idx === currentIndex,
           muted: isMuted,
           playsInline: true,
-          preload: globalIdx === currentIndex ? "metadata" : "none",
+          preload: idx === currentIndex ? "metadata" : "none",
         };
       }),
     );
-  }, [currentIndex, allMediaItems, isMuted]);
+    // Only re-run when allMediaItems changes (initial load) or muted state changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMediaItems, isMuted]);
+
+  // Update video sources when currentIndex changes (without recreating array)
+  useEffect(() => {
+    if (videos.length === 0) return;
+
+    const loadStart = Math.max(0, currentIndex - 1);
+    const loadEnd = Math.min(videos.length, currentIndex + 3);
+
+    // Directly update video element sources instead of recreating state
+    const videoElements = document.querySelectorAll('video[data-video-index]');
+    videoElements.forEach((video, idx) => {
+      const videoEl = video as HTMLVideoElement;
+      const shouldLoad = idx >= loadStart && idx < loadEnd;
+      const targetSrc = shouldLoad ? allMediaItems[idx]?.url || "" : "";
+
+      if (videoEl.src !== targetSrc && targetSrc) {
+        // Load new video
+        videoEl.src = targetSrc;
+        videoEl.load();
+      } else if (!shouldLoad && videoEl.src) {
+        // Unload distant video to save memory
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        videoEl.load();
+      }
+    });
+  }, [currentIndex, videos.length, allMediaItems]);
 
   // Update muted state on all video elements when isMuted changes
   useEffect(() => {
@@ -134,6 +156,41 @@ export default function Media() {
       video.muted = isMuted;
     });
   }, [isMuted]);
+
+  // Auto-hide overlay after inactivity
+  const resetOverlayTimeout = useCallback(() => {
+    setShowOverlay(true);
+    if (overlayTimeoutRef.current) {
+      clearTimeout(overlayTimeoutRef.current);
+    }
+    overlayTimeoutRef.current = setTimeout(() => {
+      setShowOverlay(false);
+    }, 3000); // Hide after 3 seconds of inactivity
+  }, []);
+
+  // Show overlay on user interaction
+  useEffect(() => {
+    const handleInteraction = () => {
+      resetOverlayTimeout();
+    };
+
+    // Listen for touch/mouse/scroll events
+    window.addEventListener("touchstart", handleInteraction);
+    window.addEventListener("mousemove", handleInteraction);
+    window.addEventListener("scroll", handleInteraction, true);
+
+    // Start the initial timeout
+    resetOverlayTimeout();
+
+    return () => {
+      window.removeEventListener("touchstart", handleInteraction);
+      window.removeEventListener("mousemove", handleInteraction);
+      window.removeEventListener("scroll", handleInteraction, true);
+      if (overlayTimeoutRef.current) {
+        clearTimeout(overlayTimeoutRef.current);
+      }
+    };
+  }, [resetOverlayTimeout]);
 
   // Clean up video resources when component unmounts or tab is hidden
   useEffect(() => {
@@ -171,6 +228,11 @@ export default function Media() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("beforeunload", handleBeforeUnload);
 
+      // Cleanup scroll debounce timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
       // Cleanup on component unmount
       const videoElements = document.querySelectorAll("video");
       videoElements.forEach((video) => {
@@ -181,11 +243,15 @@ export default function Media() {
     };
   }, []);
 
+  // Auto-start media stream on mount
+  useEffect(() => {
+    startMediaStream();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const startMediaStream = async () => {
     setIsLoading(true);
     setVideos([]);
     setAllMediaItems([]);
-    setHasStarted(true);
     setCurrentIndex(0);
 
     try {
@@ -237,19 +303,27 @@ export default function Media() {
     console.log("End reached");
   };
 
-  const handleItemVisible = (_: VideoItem, localIndex: number) => {
-    // Convert local index to global index
-    const globalIndex = windowOffsetRef.current + localIndex;
-    console.log(`Item visible at local index: ${localIndex}, global index: ${globalIndex}`);
-    setCurrentIndex(globalIndex);
-  };
+  const handleItemVisible = useCallback((_: VideoItem, index: number) => {
+    console.log(`Item visible at index: ${index}`);
+
+    // Debounce index updates to prevent rapid changes during fast scrolling
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    pendingIndexRef.current = index;
+
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (pendingIndexRef.current !== null) {
+        setCurrentIndex(pendingIndexRef.current);
+        pendingIndexRef.current = null;
+      }
+    }, 150); // Wait for scroll to settle
+  }, []);
 
   const handleItemHidden = useCallback(
-    (_: VideoItem, localIndex: number) => {
-      const globalIndex = windowOffsetRef.current + localIndex;
-      console.log(`Item hidden at local index: ${localIndex}, global index: ${globalIndex}`);
-      // The sliding window will handle memory management by removing videos from the DOM
-      // No need for aggressive cleanup here as it causes request cancellations
+    (_: VideoItem, index: number) => {
+      console.log(`Item hidden at index: ${index}`);
+      // Memory management is handled by setting empty src on distant videos
     },
     [],
   );
@@ -257,7 +331,25 @@ export default function Media() {
   const handleDownload = (item: VideoItem) => {
     const link = document.createElement("a");
     link.href = item.src;
-    link.download = item.src.split("/").pop() || "video";
+
+    // Extract filename from URL - handle both direct URLs and proxy URLs with path param
+    let filename = "video";
+    try {
+      const url = new URL(item.src, window.location.origin);
+      const pathParam = url.searchParams.get("path");
+      if (pathParam) {
+        // Local file via proxy - extract filename from path parameter
+        filename = pathParam.split("/").pop() || "video";
+      } else {
+        // Direct URL - extract filename from pathname
+        filename = url.pathname.split("/").pop() || "video";
+      }
+    } catch {
+      // Fallback for malformed URLs
+      filename = item.src.split("/").pop() || "video";
+    }
+
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -334,45 +426,11 @@ export default function Media() {
     };
   }, []);
 
-  if (!hasStarted) {
+  // Show loading state while fetching media
+  if (isLoading && videos.length === 0) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full space-y-6 text-center">
-          <h1 className="text-3xl font-bold text-white mb-6">
-            TikTok-like Media Viewer
-          </h1>
-
-          <div className="bg-gray-900 p-4 rounded-lg text-left">
-            <h2 className="text-lg font-semibold mb-2 text-white">
-              Parameters:
-            </h2>
-            <div className="space-y-1 text-gray-300 text-sm">
-              <p>
-                <strong>Domain:</strong> {params.baseDomain}
-              </p>
-              <p>
-                <strong>Service:</strong> {params.serviceName}
-              </p>
-              <p>
-                <strong>User ID:</strong> {params.userId}
-              </p>
-              <p>
-                <strong>Range:</strong> {params.from} - {params.to}
-              </p>
-              <p>
-                <strong>Limit:</strong> {params.limit}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={startMediaStream}
-            disabled={isLoading}
-            className="w-full bg-pink-600 text-white py-3 px-6 rounded-full font-semibold hover:bg-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isLoading ? "Loading Media..." : "Load All Media"}
-          </button>
-        </div>
+        <div className="text-white text-xl">Loading media...</div>
       </div>
     );
   }
@@ -387,10 +445,11 @@ export default function Media() {
       nextSort = "none";
     }
 
-    // Navigate to the same page with updated sort parameter
+    // Navigate to the same page with updated sort parameter and reload
     const searchParams = new URLSearchParams(window.location.search);
     searchParams.set("sortBy", nextSort);
-    navigate(`/media?${searchParams.toString()}`);
+    // Use window.location to force a full page reload with new sort
+    window.location.href = `/media?${searchParams.toString()}`;
   };
 
   const getSortLabel = () => {
@@ -407,13 +466,15 @@ export default function Media() {
 
   const handleSelectFolder = (path: string) => {
     setShowFolderBrowser(false);
-    // Navigate to media page with new directory path
+    // Navigate to media page with new directory path using full page reload
     const searchParams = new URLSearchParams();
     searchParams.set("sourceType", "local");
     searchParams.set("directoryPath", path);
-    navigate(`/media?${searchParams.toString()}`);
-    // Reload page to fetch new media
-    window.location.reload();
+    // Preserve sort setting if it exists
+    if (params.sortBy) {
+      searchParams.set("sortBy", params.sortBy);
+    }
+    window.location.href = `/media?${searchParams.toString()}`;
   };
 
   const renderVideoOverlay = (item: VideoItem, index: number) => {
@@ -421,13 +482,21 @@ export default function Media() {
       <div
         style={{
           position: "absolute",
-          right: "20px",
-          bottom: "100px",
+          right: "8px",
+          // Position above video controls (typically ~50px) plus safe area
+          bottom: "calc(50px + env(safe-area-inset-bottom, 0px))",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: "12px",
+          gap: "6px",
           zIndex: 10,
+          // Limit height to prevent covering top of screen, account for controls at bottom
+          maxHeight: "calc(100% - 110px)",
+          overflowY: "auto",
+          overflowX: "hidden",
+          opacity: showOverlay ? 1 : 0,
+          transition: "opacity 0.3s ease-in-out",
+          pointerEvents: showOverlay ? "auto" : "none",
         }}
       >
         {/* Folder Browser Button */}
@@ -435,8 +504,8 @@ export default function Media() {
           <div
             style={{
               background: "rgba(0, 0, 0, 0.6)",
-              borderRadius: "12px",
-              padding: "8px",
+              borderRadius: "10px",
+              padding: "6px",
               backdropFilter: "blur(4px)",
             }}
           >
@@ -449,16 +518,16 @@ export default function Media() {
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                padding: "8px",
+                padding: "6px",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: "4px",
+                gap: "2px",
               }}
             >
-              <Folder size={28} color="white" />
+              <Folder size={22} color="white" />
               <span
-                style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+                style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
               >
                 Browse
               </span>
@@ -470,8 +539,8 @@ export default function Media() {
         <div
           style={{
             background: "rgba(0, 0, 0, 0.6)",
-            borderRadius: "12px",
-            padding: "8px",
+            borderRadius: "10px",
+            padding: "6px",
             backdropFilter: "blur(4px)",
           }}
         >
@@ -484,16 +553,16 @@ export default function Media() {
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: "8px",
+              padding: "6px",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "4px",
+              gap: "2px",
             }}
           >
-            <ArrowUpDown size={28} color="white" />
+            <ArrowUpDown size={22} color="white" />
             <span
-              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+              style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
             >
               {getSortLabel()}
             </span>
@@ -504,8 +573,8 @@ export default function Media() {
         <div
           style={{
             background: "rgba(0, 0, 0, 0.6)",
-            borderRadius: "12px",
-            padding: "8px",
+            borderRadius: "10px",
+            padding: "6px",
             backdropFilter: "blur(4px)",
           }}
         >
@@ -518,18 +587,18 @@ export default function Media() {
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: "8px",
+              padding: "6px",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "4px",
+              gap: "2px",
             }}
           >
-            <Download size={28} color="white" />
+            <Download size={22} color="white" />
             <span
-              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+              style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
             >
-              Download
+              Save
             </span>
           </button>
         </div>
@@ -538,8 +607,8 @@ export default function Media() {
         <div
           style={{
             background: "rgba(0, 0, 0, 0.6)",
-            borderRadius: "12px",
-            padding: "8px",
+            borderRadius: "10px",
+            padding: "6px",
             backdropFilter: "blur(4px)",
           }}
         >
@@ -552,22 +621,22 @@ export default function Media() {
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: "8px",
+              padding: "6px",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "4px",
+              gap: "2px",
             }}
           >
             {isMuted ? (
-              <VolumeX size={28} color="white" />
+              <VolumeX size={22} color="white" />
             ) : (
-              <Volume2 size={28} color="white" />
+              <Volume2 size={22} color="white" />
             )}
             <span
-              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+              style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
             >
-              {isMuted ? "Unmute" : "Mute"}
+              {isMuted ? "Sound" : "Mute"}
             </span>
           </button>
         </div>
@@ -576,8 +645,8 @@ export default function Media() {
         <div
           style={{
             background: "rgba(0, 0, 0, 0.6)",
-            borderRadius: "12px",
-            padding: "8px",
+            borderRadius: "10px",
+            padding: "6px",
             backdropFilter: "blur(4px)",
           }}
         >
@@ -590,22 +659,22 @@ export default function Media() {
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: "8px",
+              padding: "6px",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: "4px",
+              gap: "2px",
             }}
           >
             {isFullscreen ? (
-              <Minimize size={28} color="white" />
+              <Minimize size={22} color="white" />
             ) : (
-              <Maximize size={28} color="white" />
+              <Maximize size={22} color="white" />
             )}
             <span
-              style={{ color: "white", fontSize: "12px", fontWeight: "500" }}
+              style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
             >
-              {isFullscreen ? "Exit" : "Fullscreen"}
+              {isFullscreen ? "Exit" : "Full"}
             </span>
           </button>
         </div>
@@ -616,16 +685,23 @@ export default function Media() {
   return (
     <>
       <div
-        style={{ height: "100vh", width: "100vw" }}
-        className="w-full h-screen"
+        style={{
+          height: "100dvh",
+          width: "100vw",
+          maxHeight: "-webkit-fill-available",
+          overflow: "hidden",
+        }}
+        className="w-full"
       >
         <VerticalFeed
           items={videos}
           onEndReached={handleEndReached}
           onItemVisible={handleItemVisible}
           onItemHidden={handleItemHidden}
-          className="h-100vh"
-          style={{ maxHeight: "100dvh" }}
+          style={{
+            maxHeight: "100dvh",
+            height: "100%",
+          }}
           renderItemOverlay={renderVideoOverlay}
           noCover={true}
         />

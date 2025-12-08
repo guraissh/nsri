@@ -17,7 +17,7 @@
     "get-video-duration": "^4.1.0",
     "isbot": "^5.1.31",
     "lucide-react": "^0.545.0",
-    "netscape-cookies-parser": "file://../Netscape-Cookies-Parser/netscape-cookies-parser-1.0.3.tgz",
+    "netscape-cookies-parser": "file://netscape-cookies-parser-1.0.3.tgz",
     "pug": "^3.0.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

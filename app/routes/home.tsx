@@ -2,8 +2,19 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
 import { FolderBrowser } from "~/FolderBrowser";
+import { X, Clock } from "lucide-react";
 
-export function meta({}: Route.MetaArgs) {
+interface HistoryEntry {
+  id: number;
+  type: "directory" | "user";
+  value: string;
+  platform?: string;
+  service?: string;
+  last_used: number;
+  use_count: number;
+}
+
+export function meta({ }: Route.MetaArgs) {
   return [
     { title: "Media Stream Configuration" },
     { name: "description", content: "Configure and stream media content" },
@@ -37,10 +48,65 @@ export default function Home() {
   const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
   const [browserStartPath, setBrowserStartPath] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // History state
+  const [recentDirectories, setRecentDirectories] = useState<HistoryEntry[]>([]);
+  const [recentUsers, setRecentUsers] = useState<HistoryEntry[]>([]);
+
+  // Load history on mount
+  useEffect(() => {
+    fetch("/api/history")
+      .then((res) => res.json())
+      .then((data) => {
+        setRecentDirectories(data.directories || []);
+        setRecentUsers(data.users || []);
+      })
+      .catch((err) => console.error("Failed to load history:", err));
+  }, []);
+
+  // Save to history helper
+  const saveToHistory = async (type: "directory" | "user", value: string, platform?: string, service?: string) => {
+    try {
+      await fetch("/api/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, value, platform, service }),
+      });
+      // Refresh history
+      const res = await fetch("/api/history");
+      const data = await res.json();
+      setRecentDirectories(data.directories || []);
+      setRecentUsers(data.users || []);
+    } catch (err) {
+      console.error("Failed to save history:", err);
+    }
+  };
+
+  // Delete history entry
+  const deleteHistoryEntry = async (id: number) => {
+    try {
+      await fetch("/api/history", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setRecentDirectories((prev) => prev.filter((e) => e.id !== id));
+      setRecentUsers((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      console.error("Failed to delete history:", err);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("Form Data:", formData);
     if (formData.sourceType === "local") {
+      // Save directory to history (fire and forget, don't block navigation)
+      fetch("/api/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "directory", value: formData.directoryPath }),
+      }).catch((err) => console.error("Failed to save history:", err));
+
       // For local directory source
       const params = new URLSearchParams({
         sourceType: "local",
@@ -50,11 +116,23 @@ export default function Home() {
       });
       navigate(`/media?${params.toString()}`);
     } else {
+      // Save user to history (fire and forget, don't block navigation)
+      fetch("/api/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "user",
+          value: formData.userId,
+          platform: formData.platform,
+          service: formData.serviceName
+        }),
+      }).catch((err) => console.error("Failed to save history:", err));
+
       // For API source
       const baseDomain =
         formData.platform === "kemono"
           ? "https://kemono.cr"
-          : "https://coomer.su";
+          : "https://coomer.st";
       const baseApiPath = "/api/v1";
 
       const params = new URLSearchParams({
@@ -187,7 +265,7 @@ export default function Home() {
                 className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                 required
               >
-                <option value="coomer">Coomer (https://coomer.su)</option>
+                <option value="coomer">Coomer (https://coomer.st)</option>
                 <option value="kemono">Kemono (https://kemono.cr)</option>
               </select>
             </div>
@@ -288,6 +366,103 @@ export default function Home() {
           Start Media Stream
         </button>
       </form>
+
+      {/* Recent History */}
+      {(recentDirectories.length > 0 || recentUsers.length > 0) && (
+        <div className="mt-8 space-y-6">
+          {/* Recent Directories */}
+          {recentDirectories.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                <Clock size={18} />
+                Recent Directories
+              </h2>
+              <div className="space-y-2">
+                {recentDirectories.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-md group"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          sourceType: "local",
+                          directoryPath: entry.value,
+                        });
+                      }}
+                      className="flex-1 text-left text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 truncate"
+                      title={entry.value}
+                    >
+                      {entry.value}
+                    </button>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {entry.use_count}x
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteHistoryEntry(entry.id)}
+                      className="p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove from history"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Recent Users */}
+          {recentUsers.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                <Clock size={18} />
+                Recent Users
+              </h2>
+              <div className="space-y-2">
+                {recentUsers.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-md group"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          sourceType: "api",
+                          platform: entry.platform || "coomer",
+                          serviceName: entry.service || "onlyfans",
+                          userId: entry.value,
+                        });
+                      }}
+                      className="flex-1 text-left text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                    >
+                      <span className="font-medium">{entry.value}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                        ({entry.platform}/{entry.service})
+                      </span>
+                    </button>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {entry.use_count}x
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteHistoryEntry(entry.id)}
+                      className="p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove from history"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Directory Browser Modal */}
       {showDirectoryBrowser && (

@@ -50,22 +50,31 @@ export async function action({ request }: Route.ActionArgs) {
     if (includeFiles) {
       const supportedExtensions = [".mp4", ".webm", ".mov", ".avi", ".mkv"];
       const cache = getFileCache();
+      const filesToProcess: string[] = [];
 
       for (const entry of entries) {
         if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase();
           if (supportedExtensions.includes(ext)) {
             const filePath = path.join(normalizedPath, entry.name);
-            try {
-              const record = await cache.getOrCreateFileRecord(filePath);
+            // Check cache without generating thumbnails (fast lookup)
+            const cached = cache.getCachedRecord(filePath);
+            if (cached) {
               files.push({
                 name: entry.name,
                 path: filePath,
-                thumbnail: record.thumbnail_path,
-                duration: record.duration,
+                thumbnail: cached.thumbnail_path,
+                duration: cached.duration,
               });
-            } catch (err) {
-              console.warn(`Error processing file ${entry.name}:`, err);
+            } else {
+              // Not in cache - add to list without thumbnail for now
+              files.push({
+                name: entry.name,
+                path: filePath,
+                thumbnail: null,
+                duration: null,
+              });
+              filesToProcess.push(filePath);
             }
           }
         }
@@ -73,6 +82,20 @@ export async function action({ request }: Route.ActionArgs) {
 
       // Sort files alphabetically
       files.sort((a, b) => a.name.localeCompare(b.name));
+
+      // Process uncached files in background (don't await)
+      if (filesToProcess.length > 0) {
+        (async () => {
+          for (const filePath of filesToProcess) {
+            try {
+              await cache.getOrCreateFileRecord(filePath);
+            } catch (err) {
+              console.warn(`Background processing error for ${filePath}:`, err);
+            }
+          }
+          console.log(`Background processed ${filesToProcess.length} files`);
+        })();
+      }
     }
 
     // Get parent directory (null if at root)

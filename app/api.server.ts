@@ -322,8 +322,9 @@ export const getMediaFromDirectory = async (
     const cache = getFileCache();
     const files = await fs.readdir(normalizedPath);
 
-    // Process all files and get/create cache records
+    // Process all files - use cache for instant lookup, queue uncached for background
     const fileRecords: FileRecord[] = [];
+    const filesToProcess: string[] = [];
 
     for (const file of files) {
       const ext = path.extname(file).toLowerCase();
@@ -333,9 +334,24 @@ export const getMediaFromDirectory = async (
         try {
           const stats = await fs.stat(filePath);
           if (stats.isFile()) {
-            // Get or create cached record (only hashes if file changed)
-            const record = await cache.getOrCreateFileRecord(filePath);
-            fileRecords.push(record);
+            // Check cache first (instant, no processing)
+            const cached = cache.getCachedRecord(filePath);
+            if (cached) {
+              fileRecords.push(cached);
+            } else {
+              // Not in cache - create a minimal record for now
+              fileRecords.push({
+                path: filePath,
+                hash: "",
+                size: stats.size,
+                mtime: Math.floor(stats.mtimeMs),
+                duration: null,
+                directory: normalizedPath,
+                filename: file,
+                thumbnail_path: null,
+              });
+              filesToProcess.push(filePath);
+            }
           }
         } catch (err) {
           console.warn(`Error processing file ${file}:`, err);
@@ -343,9 +359,23 @@ export const getMediaFromDirectory = async (
       }
     }
 
-    console.log(`Processed ${fileRecords.length} files from cache`);
+    console.log(`Found ${fileRecords.length} files (${filesToProcess.length} uncached)`);
 
-    // Remove duplicates if requested
+    // Process uncached files in background (don't await)
+    if (filesToProcess.length > 0) {
+      (async () => {
+        for (const filePath of filesToProcess) {
+          try {
+            await cache.getOrCreateFileRecord(filePath);
+          } catch (err) {
+            console.warn(`Background processing error for ${filePath}:`, err);
+          }
+        }
+        console.log(`Background processed ${filesToProcess.length} files`);
+      })();
+    }
+
+    // Remove duplicates if requested (only works for cached files with hashes)
     let processedRecords = removeDuplicates
       ? cache.deduplicateFiles(fileRecords)
       : fileRecords;
