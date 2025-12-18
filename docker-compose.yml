@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # Bunkr Backend
+  bunkr:
+    build:
+      context: ./bunkr
+      dockerfile: Dockerfile
+    container_name: nsri-bunkr
+    ports:
+      - "8001:8001"
+    volumes:
+      # Persistent storage for cached videos
+      - bunkr-downloads:/app/downloads
+      # Persistent storage for SQLite cache database
+      - bunkr-cache:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - nsri-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RedGifs Backend
+  redgifs:
+    build:
+      context: ./rg
+      dockerfile: Dockerfile
+    container_name: nsri-redgifs
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent storage for cached videos
+      - redgifs-downloads:/app/downloads
+      # Persistent storage for SQLite cache database
+      - redgifs-cache:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - nsri-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # NSRI Frontend
+  nsri:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nsri-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persistent storage for video thumbnails
+      - nsri-thumbnails:/app/public/thumbnails
+      # Persistent storage for file cache database
+      - nsri-cache:/app/data
+      # Mount local media directory (adjust path as needed)
+      - ${LOCAL_MEDIA_PATH:-./media}:/media:ro
+    environment:
+      - NODE_ENV=production
+      - ROOT_DIR=/media
+    restart: unless-stopped
+    depends_on:
+      - bunkr
+      - redgifs
+    networks:
+      - nsri-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  nsri-network:
+    driver: bridge
+
+volumes:
+  # Bunkr volumes
+  bunkr-downloads:
+    driver: local
+  bunkr-cache:
+    driver: local
+
+  # RedGifs volumes
+  redgifs-downloads:
+    driver: local
+  redgifs-cache:
+    driver: local
+
+  # NSRI volumes
+  nsri-thumbnails:
+    driver: local
+  nsri-cache:
+    driver: local

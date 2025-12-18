@@ -18,7 +18,8 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from playwright.async_api import async_playwright
 
 # Configure logging
@@ -32,6 +33,14 @@ logger = logging.getLogger(__name__)
 # SQLite Cache Configuration
 CACHE_DB_PATH = Path("cache.db")
 CACHE_DURATION_HOURS = 24  # Cache for 24 hours
+
+# Video Download Cache Configuration
+DOWNLOADS_DIR = Path("downloads")
+DOWNLOADS_DIR.mkdir(exist_ok=True)
+MAX_CACHE_SIZE_GB = 10  # Maximum cache size in GB
+MAX_FILE_SIZE_MB = 50  # Only cache files smaller than this
+MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_GB * 1024 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 def init_cache_db():
@@ -52,6 +61,23 @@ def init_cache_db():
     # Create index on expires_at for faster cleanup
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_expires_at ON api_cache(expires_at)
+    """)
+
+    # Create downloads table for cached video files
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS downloads (
+            url TEXT PRIMARY KEY,
+            filename TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            last_accessed TIMESTAMP NOT NULL,
+            verified INTEGER DEFAULT 0
+        )
+    """)
+
+    # Create index on last_accessed for LRU eviction
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_last_accessed ON downloads(last_accessed)
     """)
 
     conn.commit()
@@ -152,6 +178,150 @@ def cleanup_expired_cache():
             logger.info(f"Cleaned up {deleted_count} expired cache entries")
     except Exception as e:
         logger.error(f"Cache cleanup error: {str(e)}")
+
+
+def get_cache_size() -> int:
+    """Get total size of download cache in bytes"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(SUM(size_bytes), 0) FROM downloads")
+        total_size = cursor.fetchone()[0]
+        conn.close()
+        return total_size
+    except Exception as e:
+        logger.error(f"Error getting cache size: {str(e)}")
+        return 0
+
+
+def evict_lru_downloads(bytes_needed: int):
+    """Evict least recently used downloads to make space"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+
+        # Get LRU downloads until we have enough space
+        cursor.execute("""
+            SELECT url, filename, size_bytes
+            FROM downloads
+            ORDER BY last_accessed ASC
+        """)
+
+        freed_space = 0
+        for url, filename, size_bytes in cursor.fetchall():
+            if freed_space >= bytes_needed:
+                break
+
+            # Delete file
+            file_path = DOWNLOADS_DIR / filename
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.info(f"Evicted cached file: {filename} ({size_bytes / 1024 / 1024:.2f} MB)")
+
+                # Remove from database
+                cursor.execute("DELETE FROM downloads WHERE url = ?", (url,))
+                freed_space += size_bytes
+            except Exception as e:
+                logger.error(f"Error evicting file {filename}: {str(e)}")
+
+        conn.commit()
+        conn.close()
+
+        if freed_space > 0:
+            logger.info(f"Evicted {freed_space / 1024 / 1024:.2f} MB from cache")
+    except Exception as e:
+        logger.error(f"Error during LRU eviction: {str(e)}")
+
+
+async def download_and_cache(url: str, client: httpx.AsyncClient) -> Optional[str]:
+    """Download a file and cache it locally if it's small enough"""
+    try:
+        # Check if already cached
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename FROM downloads WHERE url = ?", (url,))
+        result = cursor.fetchone()
+
+        if result:
+            filename = result[0]
+            # Update last_accessed
+            cursor.execute(
+                "UPDATE downloads SET last_accessed = ? WHERE url = ?",
+                (datetime.now().isoformat(), url)
+            )
+            conn.commit()
+            conn.close()
+
+            file_path = DOWNLOADS_DIR / filename
+            if file_path.exists():
+                logger.info(f"Using cached file: {filename}")
+                return f"/downloads/{filename}"
+
+        conn.close()
+
+        # Check file size with HEAD request
+        try:
+            head_response = await client.head(url, follow_redirects=True, timeout=10.0)
+            content_length = head_response.headers.get("content-length")
+
+            if not content_length:
+                logger.debug(f"No content-length header for {url}, skipping cache")
+                return None
+
+            file_size = int(content_length)
+
+            if file_size > MAX_FILE_SIZE_BYTES:
+                logger.debug(f"File too large ({file_size / 1024 / 1024:.2f} MB), skipping cache")
+                return None
+
+            logger.info(f"File size: {file_size / 1024 / 1024:.2f} MB, downloading...")
+        except Exception as e:
+            logger.debug(f"Error checking file size: {str(e)}, skipping cache")
+            return None
+
+        # Check if we have enough space
+        current_size = get_cache_size()
+        if current_size + file_size > MAX_CACHE_SIZE_BYTES:
+            # Try to evict enough space
+            bytes_needed = (current_size + file_size) - MAX_CACHE_SIZE_BYTES
+            logger.info(f"Cache full, evicting {bytes_needed / 1024 / 1024:.2f} MB...")
+            evict_lru_downloads(bytes_needed)
+
+        # Download the file
+        response = await client.get(url, follow_redirects=True, timeout=60.0)
+        response.raise_for_status()
+
+        # Generate filename from URL
+        import hashlib
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+        extension = url.split('?')[0].split('.')[-1].lower()
+        if extension not in ['mp4', 'webm', 'mov', 'avi', 'mkv', 'jpg', 'jpeg', 'png', 'gif', 'webp']:
+            extension = 'mp4'  # Default to mp4
+        filename = f"{url_hash}.{extension}"
+        file_path = DOWNLOADS_DIR / filename
+
+        # Save file
+        with open(file_path, 'wb') as f:
+            f.write(response.content)
+
+        # Add to database
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT OR REPLACE INTO downloads (url, filename, size_bytes, created_at, last_accessed)
+            VALUES (?, ?, ?, ?, ?)
+        """, (url, filename, file_size, now, now))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Cached file: {filename} ({file_size / 1024 / 1024:.2f} MB)")
+        return f"/downloads/{filename}"
+
+    except Exception as e:
+        logger.error(f"Error downloading file: {str(e)}")
+        return None
 
 
 # Initialize cache on startup
@@ -452,9 +622,60 @@ async def get_album(url: str = Query(..., description="Bunkr album URL")):
 
 @app.get("/proxy")
 async def proxy_media(url: str = Query(..., description="URL to proxy")):
-    """Proxy media files from Bunkr to bypass CORS restrictions"""
+    """Proxy media files from Bunkr to bypass CORS restrictions
+
+    Downloads and caches small files on-demand, serves from cache if available
+    """
     try:
+        # Check if file is cached and verified
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename, verified FROM downloads WHERE url = ?", (url,))
+        result = cursor.fetchone()
+
+        if result:
+            filename, verified = result
+            file_path = DOWNLOADS_DIR / filename
+
+            if file_path.exists() and verified:
+                # Update last_accessed
+                cursor.execute(
+                    "UPDATE downloads SET last_accessed = ? WHERE url = ?",
+                    (datetime.now().isoformat(), url)
+                )
+                conn.commit()
+                conn.close()
+
+                logger.info(f"Serving cached file: {filename}")
+                return FileResponse(
+                    file_path,
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "Access-Control-Allow-Origin": "*"
+                    }
+                )
+
+        conn.close()
+
+        # Not cached or not verified - download and cache if small enough
         async with httpx.AsyncClient() as client:
+            # Try to download and cache
+            cached_path = await download_and_cache(url, client)
+
+            if cached_path:
+                # File was cached, serve from cache
+                filename = cached_path.split('/')[-1]
+                file_path = DOWNLOADS_DIR / filename
+                logger.info(f"Serving newly cached file: {filename}")
+                return FileResponse(
+                    file_path,
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "Access-Control-Allow-Origin": "*"
+                    }
+                )
+
+            # File too large or cache failed, proxy from CDN
             response = await client.get(
                 url,
                 headers={
@@ -483,6 +704,59 @@ async def proxy_media(url: str = Query(..., description="URL to proxy")):
     except Exception as e:
         logger.error(f"Unexpected error proxying URL {url}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/verify-cache")
+async def verify_cache(url: str = Query(..., description="URL to verify")):
+    """Mark a cached file as successfully streamed"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE downloads SET verified = 1 WHERE url = ?", (url,))
+        conn.commit()
+        conn.close()
+        logger.info(f"Verified cache for URL: {url}")
+        return {"status": "verified"}
+    except Exception as e:
+        logger.error(f"Error verifying cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/invalidate-cache")
+async def invalidate_cache(url: str = Query(..., description="URL to invalidate")):
+    """Remove a file from cache due to playback error"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename FROM downloads WHERE url = ?", (url,))
+        result = cursor.fetchone()
+
+        if result:
+            filename = result[0]
+            file_path = DOWNLOADS_DIR / filename
+
+            # Delete file
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.info(f"Deleted failed cache file: {filename}")
+            except Exception as e:
+                logger.error(f"Error deleting file: {str(e)}")
+
+            # Remove from database
+            cursor.execute("DELETE FROM downloads WHERE url = ?", (url,))
+            conn.commit()
+
+        conn.close()
+        logger.info(f"Invalidated cache for URL: {url}")
+        return {"status": "invalidated"}
+    except Exception as e:
+        logger.error(f"Error invalidating cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Mount downloads directory for serving cached files
+app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_DIR)), name="downloads")
 
 
 if __name__ == "__main__":

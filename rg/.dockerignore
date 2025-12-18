@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.db-journal
+downloads/
+cache.db
+debug.json
+README.md

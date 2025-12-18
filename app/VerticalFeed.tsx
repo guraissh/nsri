@@ -58,11 +58,34 @@ export const VerticalFeed = ({
   const retryCountsRef = useRef<Record<number, number>>({});
   const retryTimeoutsRef = useRef<Record<number, NodeJS.Timeout>>({});
 
-  const handleMediaLoad = useCallback((index: number) => {
+  const handleMediaLoad = useCallback((index: number, videoElement: HTMLVideoElement) => {
     setLoadingStates((prev) => ({ ...prev, [index]: false }));
     setErrorStates((prev) => ({ ...prev, [index]: false }));
     // Reset retry count on successful load
     retryCountsRef.current[index] = 0;
+
+    // Verify cache for proxied videos
+    const src = videoElement.src;
+    if (src && (src.includes('/proxy/bunkr-media') || src.includes('/proxy/media'))) {
+      // Extract the original URL from proxy parameter
+      try {
+        const url = new URL(src);
+        const originalUrl = url.searchParams.get('url');
+        if (originalUrl) {
+          // Determine backend URL
+          const backendUrl = src.includes('/proxy/bunkr-media')
+            ? 'http://localhost:8001'
+            : 'http://localhost:8000';
+
+          // Call verify-cache endpoint (fire and forget)
+          fetch(`${backendUrl}/verify-cache?url=${encodeURIComponent(originalUrl)}`, {
+            method: 'POST'
+          }).catch(() => {}); // Ignore errors
+        }
+      } catch (e) {
+        // Ignore URL parsing errors
+      }
+    }
   }, []);
 
   const retryVideo = useCallback((index: number, videoElement: HTMLVideoElement) => {
@@ -110,6 +133,29 @@ export const VerticalFeed = ({
         4: 'MEDIA_ERR_SRC_NOT_SUPPORTED',
       };
       console.error(`Video ${index} error: ${errorMessages[error.code] || 'UNKNOWN'} (${error.code})`);
+
+      // Invalidate cache for decode errors (corrupted cached files)
+      if (error.code === 3) {
+        const src = videoElement.src;
+        if (src && (src.includes('/proxy/bunkr-media') || src.includes('/proxy/media'))) {
+          try {
+            const url = new URL(src);
+            const originalUrl = url.searchParams.get('url');
+            if (originalUrl) {
+              const backendUrl = src.includes('/proxy/bunkr-media')
+                ? 'http://localhost:8001'
+                : 'http://localhost:8000';
+
+              // Call invalidate-cache endpoint
+              fetch(`${backendUrl}/invalidate-cache?url=${encodeURIComponent(originalUrl)}`, {
+                method: 'POST'
+              }).catch(() => {});
+            }
+          } catch (e) {
+            // Ignore URL parsing errors
+          }
+        }
+      }
     }
 
     // Only retry on network errors or source not supported (which can be transient)
@@ -256,7 +302,7 @@ export const VerticalFeed = ({
             playsInline={item.playsInline ?? true}
             controls={item.controls ?? false}
             autoPlay={item.autoPlay ?? true}
-            onLoadedData={() => handleMediaLoad(index)}
+            onLoadedData={(e) => handleMediaLoad(index, e.currentTarget)}
             onCanPlay={(e) => {
               // Auto-play when video is ready and visible
               if (visibleIndicesRef.current.has(index)) {

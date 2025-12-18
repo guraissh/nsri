@@ -1,4 +1,12 @@
-.react-router
-build
-node_modules
-README.md
+node_modules/
+build/
+.git/
+.env
+*.log
+.DS_Store
+public/thumbnails/
+file-cache.db
+file-cache.db-journal
+bunkr/
+rg/
+CLAUDE.md

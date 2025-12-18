@@ -1,22 +1,33 @@
-FROM node:20-alpine AS development-dependencies-env
-COPY . /app
-WORKDIR /app
-RUN npm ci
+FROM oven/bun:1 AS base
 
-FROM node:20-alpine AS production-dependencies-env
-COPY ./package.json package-lock.json /app/
 WORKDIR /app
-RUN npm ci --omit=dev
 
-FROM node:20-alpine AS build-env
-COPY . /app/
-COPY --from=development-dependencies-env /app/node_modules /app/node_modules
-WORKDIR /app
-RUN npm run build
+# Install dependencies
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile
 
-FROM node:20-alpine
-COPY ./package.json package-lock.json /app/
-COPY --from=production-dependencies-env /app/node_modules /app/node_modules
-COPY --from=build-env /app/build /app/build
+# Copy source code
+COPY . .
+
+# Build the application
+RUN bun run build
+
+# Production stage
+FROM oven/bun:1-slim
+
 WORKDIR /app
-CMD ["npm", "run", "start"]
+
+# Copy built files and dependencies
+COPY --from=base /app/build ./build
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/package.json ./package.json
+COPY --from=base /app/server.ts ./server.ts
+
+# Create directories for data persistence
+RUN mkdir -p /app/public/thumbnails /app/data
+
+# Expose port
+EXPOSE 3000
+
+# Start the server
+CMD ["bun", "run", "server.ts"]
