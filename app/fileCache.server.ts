@@ -27,6 +27,23 @@ interface HistoryEntry {
   use_count: number;
 }
 
+interface Playlist {
+  id?: number;
+  name: string;
+  description?: string;
+  created_at: number;
+  updated_at: number;
+}
+
+interface PlaylistItem {
+  id?: number;
+  playlist_id: number;
+  media_url: string;
+  order_index: number;
+  added_at: number;
+  thumbnail_path?: string | null;
+}
+
 class FileCache {
   private db: Database;
 
@@ -86,6 +103,47 @@ class FileCache {
     // Create index on type for fast lookups
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)
+    `);
+
+    // Create playlists table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )
+    `);
+
+    // Create playlist_items table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS playlist_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL,
+        media_url TEXT NOT NULL,
+        order_index INTEGER NOT NULL,
+        added_at INTEGER DEFAULT (strftime('%s', 'now')),
+        thumbnail_path TEXT,
+        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+        UNIQUE(playlist_id, media_url)
+      )
+    `);
+
+    // Add thumbnail_path column if it doesn't exist (for existing databases)
+    try {
+      this.db.run(`ALTER TABLE playlist_items ADD COLUMN thumbnail_path TEXT`);
+    } catch {
+      // Column already exists
+    }
+
+    // Create indices for fast playlist queries
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(playlist_id)
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_playlist_items_order ON playlist_items(playlist_id, order_index)
     `);
 
     console.log("File cache database initialized");
@@ -436,6 +494,36 @@ class FileCache {
   }
 
   /**
+   * Add or update a RedGifs search in history
+   */
+  addRedgifsToHistory(username: string, tags: string, order: string): void {
+    // Create a unique value combining username and tags
+    const value = username || `tags:${tags}`;
+    this.db.run(
+      `INSERT INTO history (type, value, platform, service, last_used, use_count)
+       VALUES ('redgifs', ?, ?, ?, strftime('%s', 'now'), 1)
+       ON CONFLICT(type, value, platform, service) DO UPDATE SET
+         last_used = strftime('%s', 'now'),
+         use_count = use_count + 1`,
+      [value, tags || null, order || 'latest']
+    );
+  }
+
+  /**
+   * Add or update a Bunkr album in history
+   */
+  addBunkrToHistory(albumUrl: string): void {
+    this.db.run(
+      `INSERT INTO history (type, value, last_used, use_count)
+       VALUES ('bunkr', ?, strftime('%s', 'now'), 1)
+       ON CONFLICT(type, value, platform, service) DO UPDATE SET
+         last_used = strftime('%s', 'now'),
+         use_count = use_count + 1`,
+      [albumUrl]
+    );
+  }
+
+  /**
    * Get recent directories from history
    */
   getRecentDirectories(limit: number = 10): HistoryEntry[] {
@@ -480,12 +568,40 @@ class FileCache {
   }
 
   /**
+   * Get recent RedGifs searches from history
+   */
+  getRecentRedgifs(limit: number = 10): HistoryEntry[] {
+    const query = this.db.query<HistoryEntry, [number]>(
+      `SELECT * FROM history
+       WHERE type = 'redgifs'
+       ORDER BY last_used DESC
+       LIMIT ?`
+    );
+    return query.all(limit);
+  }
+
+  /**
+   * Get recent Bunkr albums from history
+   */
+  getRecentBunkr(limit: number = 10): HistoryEntry[] {
+    const query = this.db.query<HistoryEntry, [number]>(
+      `SELECT * FROM history
+       WHERE type = 'bunkr'
+       ORDER BY last_used DESC
+       LIMIT ?`
+    );
+    return query.all(limit);
+  }
+
+  /**
    * Get all history entries
    */
-  getAllHistory(): { directories: HistoryEntry[]; users: HistoryEntry[] } {
+  getAllHistory(): { directories: HistoryEntry[]; users: HistoryEntry[]; redgifs: HistoryEntry[]; bunkr: HistoryEntry[] } {
     return {
       directories: this.getRecentDirectories(50),
       users: this.getRecentUsers(50),
+      redgifs: this.getRecentRedgifs(50),
+      bunkr: this.getRecentBunkr(50),
     };
   }
 
@@ -507,6 +623,387 @@ class FileCache {
     }
   }
 
+  // ============ Playlist Methods ============
+
+  /**
+   * Create a new playlist
+   */
+  createPlaylist(name: string, description?: string): Playlist {
+    const insert = this.db.run(
+      `INSERT INTO playlists (name, description)
+       VALUES (?, ?)`,
+      [name, description || null]
+    );
+
+    return {
+      id: Number(insert.lastInsertRowid),
+      name,
+      description,
+      created_at: Math.floor(Date.now() / 1000),
+      updated_at: Math.floor(Date.now() / 1000),
+    };
+  }
+
+  /**
+   * Get all playlists
+   */
+  getAllPlaylists(): Playlist[] {
+    const query = this.db.query<Playlist, []>(
+      `SELECT * FROM playlists ORDER BY updated_at DESC`
+    );
+    return query.all();
+  }
+
+  /**
+   * Get a playlist by ID
+   */
+  getPlaylist(id: number): Playlist | null {
+    const query = this.db.query<Playlist, [number]>(
+      `SELECT * FROM playlists WHERE id = ?`
+    );
+    return query.get(id) || null;
+  }
+
+  /**
+   * Get a playlist by name
+   */
+  getPlaylistByName(name: string): Playlist | null {
+    const query = this.db.query<Playlist, [string]>(
+      `SELECT * FROM playlists WHERE name = ?`
+    );
+    return query.get(name) || null;
+  }
+
+  /**
+   * Update playlist name and/or description
+   */
+  updatePlaylist(id: number, name?: string, description?: string): void {
+    const playlist = this.getPlaylist(id);
+    if (!playlist) throw new Error("Playlist not found");
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (name !== undefined) {
+      updates.push("name = ?");
+      values.push(name);
+    }
+    if (description !== undefined) {
+      updates.push("description = ?");
+      values.push(description);
+    }
+
+    if (updates.length > 0) {
+      updates.push("updated_at = strftime('%s', 'now')");
+      values.push(id);
+
+      this.db.run(
+        `UPDATE playlists SET ${updates.join(", ")} WHERE id = ?`,
+        values
+      );
+    }
+  }
+
+  /**
+   * Delete a playlist and all its items
+   */
+  deletePlaylist(id: number): void {
+    this.db.run(`DELETE FROM playlists WHERE id = ?`, [id]);
+    // CASCADE will automatically delete playlist_items
+  }
+
+  /**
+   * Generate thumbnail for a video URL (works with both local and proxy URLs)
+   */
+  private async generatePlaylistThumbnail(mediaUrl: string): Promise<string | null> {
+    try {
+      console.log(`[THUMBNAIL] Starting thumbnail generation for: ${mediaUrl}`);
+
+      // Parse the URL to extract the actual file path or remote URL
+      let filePath: string | null = null;
+
+      if (mediaUrl.includes("/proxy/local-media?path=")) {
+        console.log(`[THUMBNAIL] Detected local file proxy URL`);
+        // Local file via proxy
+        const url = new URL(mediaUrl, "http://localhost");
+        const pathParam = url.searchParams.get("path");
+        if (pathParam) {
+          filePath = decodeURIComponent(pathParam);
+          console.log(`[THUMBNAIL] Extracted local file path: ${filePath}`);
+        }
+      } else if (mediaUrl.includes("/proxy/media?url=")) {
+        console.log(`[THUMBNAIL] Detected remote media proxy URL`);
+        // Remote file via proxy - try to get RedGifs thumbnail
+        const url = new URL(mediaUrl, "http://localhost");
+        const remoteUrl = url.searchParams.get("url");
+        console.log(`[THUMBNAIL] Extracted remote URL: ${remoteUrl}`);
+
+        if (remoteUrl) {
+          // Check if it's a RedGifs URL
+          if (remoteUrl.includes("redgifs.com") || remoteUrl.includes("redgifs")) {
+            console.log(`[THUMBNAIL] Detected RedGifs URL, fetching thumbnail from API`);
+            const thumbnail = await this.getRedGifsThumbnail(remoteUrl);
+            console.log(`[THUMBNAIL] RedGifs thumbnail result: ${thumbnail}`);
+            return thumbnail;
+          } else {
+            console.log(`[THUMBNAIL] Non-RedGifs remote URL, skipping thumbnail`);
+          }
+        }
+
+        // Other remote URLs - can't generate thumbnail
+        return null;
+      } else {
+        console.log(`[THUMBNAIL] Detected direct file path`);
+        // Direct file path
+        filePath = mediaUrl;
+      }
+
+      if (!filePath) {
+        console.log(`[THUMBNAIL] No file path extracted, returning null`);
+        return null;
+      }
+
+      if (!existsSync(filePath)) {
+        console.log(`[THUMBNAIL] File does not exist: ${filePath}`);
+        return null;
+      }
+
+      console.log(`[THUMBNAIL] Checking cache for: ${filePath}`);
+      // Check if we already have a cached file record with thumbnail
+      const cached = this.getCachedRecord(filePath);
+      if (cached?.thumbnail_path) {
+        console.log(`[THUMBNAIL] Found cached thumbnail: ${cached.thumbnail_path}`);
+        return cached.thumbnail_path;
+      }
+
+      console.log(`[THUMBNAIL] No cached thumbnail, generating new one`);
+      // Generate new thumbnail using existing file record system
+      const record = await this.getOrCreateFileRecord(filePath);
+      console.log(`[THUMBNAIL] Generated thumbnail: ${record.thumbnail_path}`);
+      return record.thumbnail_path;
+    } catch (error) {
+      console.error("[THUMBNAIL] Failed to generate playlist thumbnail:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get thumbnail URL from RedGifs API
+   */
+  private async getRedGifsThumbnail(videoUrl: string): Promise<string | null> {
+    try {
+      console.log(`Getting RedGifs thumbnail for: ${videoUrl}`);
+
+      // Extract gif ID from RedGifs URL
+      // Format: https://thumbs2.redgifs.com/.../{id}.mp4 or similar
+      const match = videoUrl.match(/\/([a-zA-Z0-9-_]+)\.(mp4|webm)/);
+      if (!match) {
+        console.warn("Could not extract RedGifs ID from URL:", videoUrl);
+        return null;
+      }
+
+      const gifId = match[1].toLowerCase(); // RedGifs API uses lowercase IDs
+      console.log(`Extracted RedGifs ID: ${gifId}`);
+
+      // Call RedGifs backend to get gif info
+      const redgifsBaseUrl = process.env.REDGIFS_API_URL || "http://localhost:8000";
+      const apiUrl = `${redgifsBaseUrl}/api/gif/${gifId}`;
+      console.log(`Calling RedGifs API: ${apiUrl}`);
+
+      const response = await fetch(apiUrl);
+
+      if (!response.ok) {
+        console.warn(`RedGifs API error for ${gifId}:`, response.status, response.statusText);
+        const errorText = await response.text();
+        console.warn(`Error response: ${errorText}`);
+        return null;
+      }
+
+      const data = await response.json();
+      console.log(`RedGifs API response:`, data);
+
+      // Get poster (better quality) or thumbnail URL
+      const directUrl = data.urls?.poster || data.urls?.thumbnail || null;
+
+      if (!directUrl) {
+        console.warn("No thumbnail URL found in RedGifs API response");
+        return null;
+      }
+
+      // Proxy the thumbnail through NSRI's /proxy/media endpoint (same as video URLs)
+      const proxiedUrl = `/proxy/media?url=${encodeURIComponent(directUrl)}`;
+      console.log(`RedGifs proxied thumbnail URL: ${proxiedUrl}`);
+      return proxiedUrl;
+    } catch (error) {
+      console.warn("Failed to get RedGifs thumbnail:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Add a media item to a playlist
+   */
+  async addToPlaylist(playlistId: number, mediaUrl: string): Promise<void> {
+    // Get the current max order_index for this playlist
+    const maxQuery = this.db.query<{ max_order: number | null }, [number]>(
+      `SELECT MAX(order_index) as max_order FROM playlist_items WHERE playlist_id = ?`
+    );
+    const result = maxQuery.get(playlistId);
+    const nextOrder = (result?.max_order ?? -1) + 1;
+
+    // Generate thumbnail for the video
+    console.log(`Generating thumbnail for: ${mediaUrl}`);
+    const thumbnailPath = await this.generatePlaylistThumbnail(mediaUrl);
+    console.log(`Generated thumbnail path: ${thumbnailPath}`);
+
+    // Insert the item with thumbnail
+    this.db.run(
+      `INSERT OR IGNORE INTO playlist_items (playlist_id, media_url, order_index, thumbnail_path)
+       VALUES (?, ?, ?, ?)`,
+      [playlistId, mediaUrl, nextOrder, thumbnailPath]
+    );
+
+    console.log(`Added to playlist ${playlistId}: ${mediaUrl} with thumbnail ${thumbnailPath}`);
+
+    // Update playlist's updated_at timestamp
+    this.db.run(
+      `UPDATE playlists SET updated_at = strftime('%s', 'now') WHERE id = ?`,
+      [playlistId]
+    );
+  }
+
+  /**
+   * Get all items in a playlist, ordered by order_index
+   */
+  getPlaylistItems(playlistId: number): PlaylistItem[] {
+    const query = this.db.query<PlaylistItem, [number]>(
+      `SELECT * FROM playlist_items WHERE playlist_id = ? ORDER BY order_index ASC`
+    );
+    return query.all(playlistId);
+  }
+
+  /**
+   * Remove an item from a playlist
+   */
+  removeFromPlaylist(playlistId: number, mediaUrl: string): void {
+    // Get the order_index of the item being removed
+    const itemQuery = this.db.query<PlaylistItem, [number, string]>(
+      `SELECT * FROM playlist_items WHERE playlist_id = ? AND media_url = ?`
+    );
+    const item = itemQuery.get(playlistId, mediaUrl);
+
+    if (item) {
+      // Delete the item
+      this.db.run(
+        `DELETE FROM playlist_items WHERE playlist_id = ? AND media_url = ?`,
+        [playlistId, mediaUrl]
+      );
+
+      // Reorder remaining items to fill the gap
+      this.db.run(
+        `UPDATE playlist_items
+         SET order_index = order_index - 1
+         WHERE playlist_id = ? AND order_index > ?`,
+        [playlistId, item.order_index]
+      );
+
+      // Update playlist's updated_at timestamp
+      this.db.run(
+        `UPDATE playlists SET updated_at = strftime('%s', 'now') WHERE id = ?`,
+        [playlistId]
+      );
+    }
+  }
+
+  /**
+   * Reorder a playlist item
+   */
+  reorderPlaylistItem(playlistId: number, mediaUrl: string, newIndex: number): void {
+    // Get current item
+    const itemQuery = this.db.query<PlaylistItem, [number, string]>(
+      `SELECT * FROM playlist_items WHERE playlist_id = ? AND media_url = ?`
+    );
+    const item = itemQuery.get(playlistId, mediaUrl);
+
+    if (!item) return;
+
+    const oldIndex = item.order_index;
+
+    if (oldIndex === newIndex) return;
+
+    // Move items in between
+    if (oldIndex < newIndex) {
+      // Moving down: shift items up
+      this.db.run(
+        `UPDATE playlist_items
+         SET order_index = order_index - 1
+         WHERE playlist_id = ? AND order_index > ? AND order_index <= ?`,
+        [playlistId, oldIndex, newIndex]
+      );
+    } else {
+      // Moving up: shift items down
+      this.db.run(
+        `UPDATE playlist_items
+         SET order_index = order_index + 1
+         WHERE playlist_id = ? AND order_index >= ? AND order_index < ?`,
+        [playlistId, newIndex, oldIndex]
+      );
+    }
+
+    // Update the moved item
+    this.db.run(
+      `UPDATE playlist_items SET order_index = ? WHERE playlist_id = ? AND media_url = ?`,
+      [newIndex, playlistId, mediaUrl]
+    );
+
+    // Update playlist's updated_at timestamp
+    this.db.run(
+      `UPDATE playlists SET updated_at = strftime('%s', 'now') WHERE id = ?`,
+      [playlistId]
+    );
+  }
+
+  /**
+   * Check if a media URL exists in a playlist
+   */
+  isInPlaylist(playlistId: number, mediaUrl: string): boolean {
+    const query = this.db.query<{ count: number }, [number, string]>(
+      `SELECT COUNT(*) as count FROM playlist_items WHERE playlist_id = ? AND media_url = ?`
+    );
+    const result = query.get(playlistId, mediaUrl);
+    return (result?.count ?? 0) > 0;
+  }
+
+  /**
+   * Regenerate thumbnails for all playlist items missing thumbnails
+   */
+  async regenerateMissingThumbnails(): Promise<number> {
+    const query = this.db.query<PlaylistItem, []>(
+      `SELECT * FROM playlist_items WHERE thumbnail_path IS NULL OR thumbnail_path = ''`
+    );
+    const itemsNeedingThumbnails = query.all();
+
+    console.log(`Found ${itemsNeedingThumbnails.length} playlist items missing thumbnails`);
+
+    let regenerated = 0;
+    for (const item of itemsNeedingThumbnails) {
+      console.log(`Regenerating thumbnail for: ${item.media_url}`);
+      const thumbnailPath = await this.generatePlaylistThumbnail(item.media_url);
+
+      if (thumbnailPath) {
+        this.db.run(
+          `UPDATE playlist_items SET thumbnail_path = ? WHERE id = ?`,
+          [thumbnailPath, item.id]
+        );
+        regenerated++;
+        console.log(`Updated thumbnail for item ${item.id}: ${thumbnailPath}`);
+      }
+    }
+
+    console.log(`Regenerated ${regenerated} thumbnails`);
+    return regenerated;
+  }
+
   /**
    * Close database connection
    */
@@ -526,4 +1023,4 @@ export function getFileCache(): FileCache {
 }
 
 export { FileCache };
-export type { FileRecord, HistoryEntry };
+export type { FileRecord, HistoryEntry, Playlist, PlaylistItem };

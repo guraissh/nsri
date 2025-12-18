@@ -12,13 +12,19 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (request.method === "POST") {
     const body = await request.json();
-    const { type, value, platform, service } = body;
+    const { type, value, platform, service, username, tags, order } = body;
 
     if (type === "directory" && value) {
       cache.addDirectoryToHistory(value);
       return Response.json({ success: true });
     } else if (type === "user" && value && platform && service) {
       cache.addUserToHistory(value, platform, service);
+      return Response.json({ success: true });
+    } else if (type === "redgifs" && (username || tags)) {
+      cache.addRedgifsToHistory(username || "", tags || "", order || "latest");
+      return Response.json({ success: true });
+    } else if (type === "bunkr" && value) {
+      cache.addBunkrToHistory(value);
       return Response.json({ success: true });
     }
 

@@ -8,4 +8,5 @@ export default [
   route("api/history", "routes/api.history.tsx"),
   route("proxy/media", "routes/proxy.media.tsx"),
   route("proxy/local-media", "routes/proxy.local-media.tsx"),
+  route("proxy/bunkr-media", "routes/proxy.bunkr-media.tsx"),
 ] satisfies RouteConfig;

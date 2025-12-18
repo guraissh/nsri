@@ -1,6 +1,7 @@
 import type { Route } from "./+types/api.stream-media";
-import { getAllUserMedia, getMediaFromDirectory } from "~/api.server";
+import { getAllUserMedia, getMediaFromDirectory, getRedgifsMedia, getBunkrMedia } from "~/api.server";
 import { getSession, commitSession, parsedCookies } from "~/sessions.server";
+import { getFileCache } from "~/fileCache.server";
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
@@ -19,6 +20,16 @@ export async function action({ request }: Route.ActionArgs) {
     from,
     to,
     limit,
+    // RedGifs params
+    rgUsername,
+    rgTags,
+    rgOrder,
+    rgPage,
+    rgCount,
+    // Playlist params
+    playlistId,
+    // Bunkr params
+    bunkrAlbumUrl,
   } = params;
 
   console.log("Fetching media with params:", params);
@@ -29,12 +40,33 @@ export async function action({ request }: Route.ActionArgs) {
       "Content-Type": "application/json",
     });
 
-    if (sourceType === "local") {
+    if (sourceType === "playlist") {
+      // Fetch media from playlist
+      console.log(`Fetching media from playlist: ${playlistId}`);
+      const cache = getFileCache();
+      const items = cache.getPlaylistItems(parseInt(playlistId));
+      mediaUrls = items.map(item => item.media_url);
+    } else if (sourceType === "local") {
       // Fetch media from local directory
       console.log(`Fetching media from local directory: ${directoryPath}`);
       mediaUrls = await getMediaFromDirectory(directoryPath, limit, sortBy);
+    } else if (sourceType === "redgifs") {
+      // Fetch media from RedGifs
+      console.log(`Fetching media from RedGifs: username=${rgUsername}, tags=${rgTags}, order=${rgOrder}`);
+      mediaUrls = await getRedgifsMedia(
+        rgUsername || undefined,
+        rgTags || undefined,
+        rgOrder || "latest",
+        parseInt(rgPage || "1"),
+        parseInt(rgCount || "80"),
+        parseInt(limit || "-1"),
+      );
+    } else if (sourceType === "bunkr") {
+      // Fetch media from Bunkr
+      console.log(`Fetching media from Bunkr: ${bunkrAlbumUrl}`);
+      mediaUrls = await getBunkrMedia(bunkrAlbumUrl);
     } else {
-      console.log(`Fetching media from api: ${baseDomain}, userId: ${userId}`);
+      console.log(`Fetching media from api: ${baseDomain} ${baseApiPath} ${serviceName}, userId: ${userId}`);
 
       // Get session and set up cookies for API source
       const session = await getSession(request.headers.get("Cookie"));

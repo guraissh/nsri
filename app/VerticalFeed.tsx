@@ -55,15 +55,72 @@ export const VerticalFeed = ({
     {},
   );
   const [errorStates, setErrorStates] = useState<Record<number, boolean>>({});
+  const retryCountsRef = useRef<Record<number, number>>({});
+  const retryTimeoutsRef = useRef<Record<number, NodeJS.Timeout>>({});
 
   const handleMediaLoad = useCallback((index: number) => {
     setLoadingStates((prev) => ({ ...prev, [index]: false }));
+    setErrorStates((prev) => ({ ...prev, [index]: false }));
+    // Reset retry count on successful load
+    retryCountsRef.current[index] = 0;
   }, []);
 
-  const handleMediaError = useCallback((index: number) => {
-    setErrorStates((prev) => ({ ...prev, [index]: true }));
-    setLoadingStates((prev) => ({ ...prev, [index]: false }));
-  }, []);
+  const retryVideo = useCallback((index: number, videoElement: HTMLVideoElement) => {
+    const maxRetries = 3;
+    const currentRetries = retryCountsRef.current[index] || 0;
+
+    if (currentRetries >= maxRetries) {
+      console.error(`Max retries (${maxRetries}) reached for video ${index}`);
+      setErrorStates((prev) => ({ ...prev, [index]: true }));
+      setLoadingStates((prev) => ({ ...prev, [index]: false }));
+      return;
+    }
+
+    // Exponential backoff: 1s, 2s, 4s
+    const retryDelay = Math.pow(2, currentRetries) * 1000;
+    retryCountsRef.current[index] = currentRetries + 1;
+
+    console.log(`Retrying video ${index} (attempt ${currentRetries + 1}/${maxRetries}) after ${retryDelay}ms`);
+
+    // Clear any existing retry timeout
+    if (retryTimeoutsRef.current[index]) {
+      clearTimeout(retryTimeoutsRef.current[index]);
+    }
+
+    retryTimeoutsRef.current[index] = setTimeout(() => {
+      const item = items[index];
+      if (item?.src) {
+        videoElement.src = item.src;
+        videoElement.load();
+      }
+      delete retryTimeoutsRef.current[index];
+    }, retryDelay);
+  }, [items]);
+
+  const handleMediaError = useCallback((index: number, event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const videoElement = event.currentTarget;
+    const error = videoElement.error;
+
+    // Log error details
+    if (error) {
+      const errorMessages: Record<number, string> = {
+        1: 'MEDIA_ERR_ABORTED',
+        2: 'MEDIA_ERR_NETWORK',
+        3: 'MEDIA_ERR_DECODE',
+        4: 'MEDIA_ERR_SRC_NOT_SUPPORTED',
+      };
+      console.error(`Video ${index} error: ${errorMessages[error.code] || 'UNKNOWN'} (${error.code})`);
+    }
+
+    // Only retry on network errors or source not supported (which can be transient)
+    // Don't retry on decode errors as they're unlikely to succeed
+    if (!error || error.code === 2 || error.code === 4) {
+      retryVideo(index, videoElement);
+    } else {
+      setErrorStates((prev) => ({ ...prev, [index]: true }));
+      setLoadingStates((prev) => ({ ...prev, [index]: false }));
+    }
+  }, [retryVideo]);
 
   // Track which indices are currently visible
   const visibleIndicesRef = useRef<Set<number>>(new Set());
@@ -116,6 +173,12 @@ export const VerticalFeed = ({
     mediaElements.forEach((media) => observer.observe(media));
 
     return () => {
+      // Clean up all retry timeouts
+      Object.values(retryTimeoutsRef.current).forEach((timeout) => {
+        clearTimeout(timeout);
+      });
+      retryTimeoutsRef.current = {};
+
       // Clean up all video buffers before disconnecting observer
       const videoElements =
         containerRef.current?.querySelectorAll("video") || [];
@@ -200,7 +263,12 @@ export const VerticalFeed = ({
                 (e.target as HTMLVideoElement).play().catch(() => {});
               }
             }}
-            onError={() => handleMediaError(index)}
+            onError={(e) => handleMediaError(index, e)}
+            onStalled={(e) => {
+              console.warn(`Video ${index} stalled, attempting reload...`);
+              const videoElement = e.currentTarget;
+              retryVideo(index, videoElement);
+            }}
             preload={
               item.preload ? (item.preload as string | undefined) : undefined
             }
@@ -227,8 +295,11 @@ export const VerticalFeed = ({
       errorComponent,
       handleMediaLoad,
       handleMediaError,
+      retryVideo,
       onItemClick,
       renderItemOverlay,
+      videoStyles,
+      noCover,
     ],
   );
 

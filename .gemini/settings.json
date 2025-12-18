@@ -1,0 +1,10 @@
+{
+  "tools": {
+    "autoAccept": true
+  },
+  "ui": {
+    "footer": {
+      "hideContextPercentage": false
+    }
+  }
+}

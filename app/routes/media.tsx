@@ -3,9 +3,11 @@ import { useLoaderData, useNavigate } from "react-router";
 import "@vidstack/react/player/styles/default/theme.css";
 import "@vidstack/react/player/styles/default/layouts/video.css";
 import type { Route } from "./+types/media";
-import { ArrowUpDown, Download, Folder, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
+import { ArrowUpDown, Download, Folder, Volume2, VolumeX, Maximize, Minimize, Plus, List } from "lucide-react";
 import { VerticalFeed, type VideoItem } from "~/VerticalFeed";
 import { FolderBrowser } from "~/FolderBrowser";
+import { PlaylistViewer } from "~/PlaylistViewer";
+import type { PlaylistItem } from "~/fileCache.server";
 
 interface MediaItem {
   url: string;
@@ -28,6 +30,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     directoryPath: url.searchParams.get("directoryPath") || "",
     sourceType: url.searchParams.get("sourceType") || "api",
     sortBy: url.searchParams.get("sortBy") || "none",
+    // RedGifs params
+    rgUsername: url.searchParams.get("rgUsername") || "",
+    rgTags: url.searchParams.get("rgTags") || "",
+    rgOrder: url.searchParams.get("rgOrder") || "latest",
+    rgPage: url.searchParams.get("rgPage") || "1",
+    rgCount: url.searchParams.get("rgCount") || "80",
+    // Playlist params
+    playlistId: url.searchParams.get("playlistId") || "",
+    // Bunkr params
+    bunkrAlbumUrl: url.searchParams.get("bunkrAlbumUrl") || "",
   };
 
   return params;
@@ -95,6 +107,14 @@ export default function Media() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
   const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
+  const [playlists, setPlaylists] = useState<Array<{ id: number; name: string }>>([]);
+  const [showNewPlaylistForm, setShowNewPlaylistForm] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [currentVideoUrl, setCurrentVideoUrl] = useState("");
+  const [showPlaylistViewer, setShowPlaylistViewer] = useState(false);
+  const [playlistItems, setPlaylistItems] = useState<PlaylistItem[]>([]);
+  const [playlistName, setPlaylistName] = useState("");
 
   // Initialize videos array when media items are loaded
   useEffect(() => {
@@ -247,6 +267,19 @@ export default function Media() {
   useEffect(() => {
     startMediaStream();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load playlist data if source is playlist
+  useEffect(() => {
+    if (params.sourceType === "playlist" && params.playlistId) {
+      fetch(`/api/playlists?id=${params.playlistId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setPlaylistItems(data.items || []);
+          setPlaylistName(data.playlist?.name || "Playlist");
+        })
+        .catch((err) => console.error("Failed to load playlist data:", err));
+    }
+  }, [params.sourceType, params.playlistId]);
 
   const startMediaStream = async () => {
     setIsLoading(true);
@@ -436,31 +469,74 @@ export default function Media() {
   }
 
   const handleCycleSortOrder = () => {
-    const currentSort = params.sortBy;
-    let nextSort = "duration-desc";
+    const searchParams = new URLSearchParams(window.location.search);
 
-    if (currentSort === "duration-desc") {
-      nextSort = "duration-asc";
-    } else if (currentSort === "duration-asc") {
-      nextSort = "none";
+    if (params.sourceType === "redgifs") {
+      // RedGifs-specific sorting
+      const currentOrder = params.rgOrder;
+      let nextOrder = "latest";
+
+      if (currentOrder === "latest") {
+        nextOrder = "top";
+      } else if (currentOrder === "top") {
+        nextOrder = "top28";
+      } else if (currentOrder === "top28") {
+        nextOrder = "duration-desc";
+      } else if (currentOrder === "duration-desc") {
+        nextOrder = "duration-asc";
+      } else if (currentOrder === "duration-asc") {
+        nextOrder = "latest";
+      }
+
+      searchParams.set("rgOrder", nextOrder);
+    } else {
+      // Local directory sorting
+      const currentSort = params.sortBy;
+      let nextSort = "duration-desc";
+
+      if (currentSort === "duration-desc") {
+        nextSort = "duration-asc";
+      } else if (currentSort === "duration-asc") {
+        nextSort = "none";
+      }
+
+      searchParams.set("sortBy", nextSort);
     }
 
-    // Navigate to the same page with updated sort parameter and reload
-    const searchParams = new URLSearchParams(window.location.search);
-    searchParams.set("sortBy", nextSort);
     // Use window.location to force a full page reload with new sort
     window.location.href = `/media?${searchParams.toString()}`;
   };
 
   const getSortLabel = () => {
-    switch (params.sortBy) {
-      case "duration-desc":
-        return "Longest";
-      case "duration-asc":
-        return "Shortest";
-      case "none":
-      default:
-        return "Default";
+    if (params.sourceType === "redgifs") {
+      // RedGifs sorting labels
+      switch (params.rgOrder) {
+        case "latest":
+          return "Latest";
+        case "trending":
+          return "Trending";
+        case "top":
+          return "Top All";
+        case "top28":
+          return "Top Week";
+        case "duration-desc":
+          return "Longest";
+        case "duration-asc":
+          return "Shortest";
+        default:
+          return "Latest";
+      }
+    } else {
+      // Local directory sorting labels
+      switch (params.sortBy) {
+        case "duration-desc":
+          return "Longest";
+        case "duration-asc":
+          return "Shortest";
+        case "none":
+        default:
+          return "Default";
+      }
     }
   };
 
@@ -477,14 +553,107 @@ export default function Media() {
     window.location.href = `/media?${searchParams.toString()}`;
   };
 
+  const handleJumpToVideo = (index: number) => {
+    // Scroll to the video at the specified index
+    const container = containerRef.current;
+    if (container) {
+      const videoHeight = window.innerHeight;
+      container.scrollTo({
+        top: index * videoHeight,
+        behavior: "smooth",
+      });
+    }
+    setCurrentIndex(index);
+  };
+
+  const fetchPlaylists = async () => {
+    try {
+      const response = await fetch("/api/playlists");
+      const data = await response.json();
+      setPlaylists(data.playlists || []);
+    } catch (error) {
+      console.error("Error fetching playlists:", error);
+    }
+  };
+
+  const handleAddToPlaylist = (videoUrl: string) => {
+    setCurrentVideoUrl(videoUrl);
+    setShowPlaylistModal(true);
+    fetchPlaylists();
+  };
+
+  const handleCreatePlaylist = async () => {
+    if (!newPlaylistName.trim()) return;
+
+    try {
+      const response = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          name: newPlaylistName.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Add video to newly created playlist
+        await addVideoToPlaylist(data.playlist.id);
+        setNewPlaylistName("");
+        setShowNewPlaylistForm(false);
+        setShowPlaylistModal(false);
+      }
+    } catch (error) {
+      console.error("Error creating playlist:", error);
+    }
+  };
+
+  const addVideoToPlaylist = async (playlistId: number) => {
+    try {
+      console.log("Adding to playlist:", { playlistId, mediaUrl: currentVideoUrl });
+
+      if (!currentVideoUrl) {
+        console.error("No video URL set!");
+        alert("Error: No video URL");
+        return;
+      }
+
+      const response = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add",
+          playlistId: playlistId.toString(),
+          mediaUrl: currentVideoUrl,
+        }),
+      });
+
+      if (response.ok) {
+        setShowPlaylistModal(false);
+        // Show success feedback
+        alert("Added to playlist!");
+      } else {
+        const error = await response.json();
+        console.error("API error:", error);
+        alert(`Error: ${error.error || "Failed to add to playlist"}`);
+      }
+    } catch (error) {
+      console.error("Error adding to playlist:", error);
+      alert("Error adding to playlist");
+    }
+  };
+
   const renderVideoOverlay = (item: VideoItem, index: number) => {
+    // Use the current playing video's URL from allMediaItems
+    const actualMediaUrl = allMediaItems[currentIndex]?.url || item.src;
+
     return (
       <div
         style={{
           position: "absolute",
           right: "8px",
           // Position above video controls (typically ~50px) plus safe area
-          bottom: "calc(50px + env(safe-area-inset-bottom, 0px))",
+          bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -678,6 +847,76 @@ export default function Media() {
             </span>
           </button>
         </div>
+
+        {/* Add to Playlist Button */}
+        <div
+          style={{
+            background: "rgba(0, 0, 0, 0.6)",
+            borderRadius: "10px",
+            padding: "6px",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAddToPlaylist(actualMediaUrl);
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "6px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "2px",
+            }}
+          >
+            <Plus size={22} color="white" />
+            <span
+              style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
+            >
+              Add
+            </span>
+          </button>
+        </div>
+
+        {/* View Playlist Button (only show when playing a playlist) */}
+        {params.sourceType === "playlist" && playlistItems.length > 0 && (
+          <div
+            style={{
+              background: "rgba(0, 0, 0, 0.6)",
+              borderRadius: "10px",
+              padding: "6px",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPlaylistViewer(true);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "6px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "2px",
+              }}
+            >
+              <List size={22} color="white" />
+              <span
+                style={{ color: "white", fontSize: "10px", fontWeight: "500" }}
+              >
+                Queue
+              </span>
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -727,6 +966,166 @@ export default function Media() {
               onSelectPath={handleSelectFolder}
               initialPath={params.directoryPath}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Playlist Viewer Modal */}
+      {showPlaylistViewer && (
+        <PlaylistViewer
+          items={playlistItems}
+          currentIndex={currentIndex}
+          onJumpToVideo={handleJumpToVideo}
+          onClose={() => setShowPlaylistViewer(false)}
+          playlistName={playlistName}
+        />
+      )}
+
+      {/* Playlist Modal */}
+      {showPlaylistModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.8)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={() => setShowPlaylistModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: "#1a1a1a",
+              borderRadius: "12px",
+              padding: "24px",
+              maxWidth: "400px",
+              width: "100%",
+              maxHeight: "80vh",
+              overflowY: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ color: "white", marginBottom: "16px", fontSize: "20px", fontWeight: "600" }}>
+              Add to Playlist
+            </h2>
+
+            {!showNewPlaylistForm ? (
+              <>
+                {playlists.length > 0 && (
+                  <div style={{ marginBottom: "16px" }}>
+                    {playlists.map((playlist) => (
+                      <button
+                        key={playlist.id}
+                        onClick={() => addVideoToPlaylist(playlist.id)}
+                        style={{
+                          width: "100%",
+                          padding: "12px",
+                          marginBottom: "8px",
+                          backgroundColor: "#2a2a2a",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {playlist.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowNewPlaylistForm(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    backgroundColor: "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    fontSize: "14px",
+                    fontWeight: "500",
+                  }}
+                >
+                  <Plus size={18} />
+                  Create New Playlist
+                </button>
+              </>
+            ) : (
+              <div>
+                <input
+                  type="text"
+                  value={newPlaylistName}
+                  onChange={(e) => setNewPlaylistName(e.target.value)}
+                  placeholder="Playlist name"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    marginBottom: "12px",
+                    backgroundColor: "#2a2a2a",
+                    color: "white",
+                    border: "1px solid #444",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                  }}
+                  autoFocus
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter") {
+                      handleCreatePlaylist();
+                    }
+                  }}
+                />
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={handleCreatePlaylist}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      backgroundColor: "#3b82f6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Create
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowNewPlaylistForm(false);
+                      setNewPlaylistName("");
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      backgroundColor: "#444",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
