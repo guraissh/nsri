@@ -10,5 +10,5 @@
 *_cookies.txt
 
 # Generated
-file-cache.db
+*.db
 public/thumbnails

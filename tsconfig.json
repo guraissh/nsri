@@ -5,6 +5,7 @@
     "**/.client/**/*",
     ".react-router/types/**/*"
   ],
+  "exclude":["rg", "bunkr"],
   "compilerOptions": {
     "types": [ "vite/client", "@types/bun"],
 		"target": "ES2022",

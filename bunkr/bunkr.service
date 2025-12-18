@@ -4,13 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=dietpi
-Group=dietpi
-WorkingDirectory=/home/dietpi/bunkr
-Environment="PATH=/home/dietpi/bunkr/venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/dietpi/bunkr/venv/bin/python /home/dietpi/bunkr/main.py
+User=root
+WorkingDirectory=/home/a/dev/nsri/bunkr
+Environment="PATH=/home/a/dev/nsri/rg/bunkr/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/a/dev/nsri/rg/bunkr/venv/bin/python /home/a/dev/nsri/rg/bunkr/main.py
 Restart=always
-RestartSec=10
+RestartSec=20
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bunkr
