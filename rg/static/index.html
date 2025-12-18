@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>RedGifs Viewer</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+	<style>
+		/* Custom scrollbar */
+		::-webkit-scrollbar {
+			width: 8px;
+			height: 8px;
+		}
+
+		::-webkit-scrollbar-track {
+			background: #1f2937;
+		}
+
+		::-webkit-scrollbar-thumb {
+			background: #4b5563;
+			border-radius: 4px;
+		}
+
+		::-webkit-scrollbar-thumb:hover {
+			background: #6b7280;
+		}
+
+		/* Video thumbnail hover */
+		.gif-card:hover .play-overlay {
+			opacity: 1;
+		}
+
+		.gif-card video {
+			object-fit: cover;
+		}
+
+		/* Loading spinner */
+		.spinner {
+			border: 3px solid #374151;
+			border-top: 3px solid #ef4444;
+			border-radius: 50%;
+			width: 40px;
+			height: 40px;
+			animation: spin 1s linear infinite;
+		}
+
+		@keyframes spin {
+			0% {
+				transform: rotate(0deg);
+			}
+
+			100% {
+				transform: rotate(360deg);
+			}
+		}
+
+		/* Modal */
+		.modal-backdrop {
+			background: rgba(0, 0, 0, 0.9);
+		}
+
+		/* Responsive grid */
+		.gif-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+			gap: 0.5rem;
+		}
+
+		@media (min-width: 640px) {
+			.gif-grid {
+				grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+				gap: 1rem;
+			}
+		}
+
+		@media (min-width: 1024px) {
+			.gif-grid {
+				grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+			}
+		}
+
+		/* Mobile-friendly touch targets */
+		@media (max-width: 640px) {
+			.gif-card {
+				cursor: pointer;
+				-webkit-tap-highlight-color: transparent;
+			}
+		}
+
+		/* Stats badges */
+		.stat-badge {
+			backdrop-filter: blur(4px);
+			background: rgba(0, 0, 0, 0.6);
+		}
+	</style>
+</head>
+
+<body class="bg-gray-900 text-white min-h-screen">
+	<!-- Header -->
+	<header class="top-0 z-40 bg-gray-800/95 backdrop-blur border-b border-gray-700">
+		<div class="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
+			<div class="flex flex-col sm:flex-row gap-3 items-center">
+				<h1 class="text-xl font-bold text-red-500 whitespace-nowrap">RedGifs Viewer</h1>
+
+				<!-- Search Form -->
+				<form id="searchForm" class="flex-1 flex gap-2 w-full sm:w-auto">
+					<input type="text" id="searchInput" placeholder="Enter username(s) separated by commas..."
+						class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-red-500 text-sm">
+					<button type="submit"
+						class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition text-sm whitespace-nowrap">
+						Search User
+					</button>
+				</form>
+			</div>
+
+			<!-- Filters Section -->
+			<div id="filtersSection" class="hidden mt-3 pt-3 border-t border-gray-700">
+				<div class="flex flex-col gap-3">
+					<!-- Tag Filter -->
+					<div class="flex-1">
+						<button id="tagFilterToggle" type="button"
+							class="flex items-center justify-between w-full text-left text-xs text-gray-400 mb-1 hover:text-gray-300 transition">
+							<span>Filter by Tags (click to select multiple)</span>
+							<svg id="tagFilterIcon" class="w-4 h-4 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+								<path fill-rule="evenodd"
+									d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+									clip-rule="evenodd" />
+							</svg>
+						</button>
+						<div id="tagFilterContainer"
+							class="flex flex-wrap gap-1 p-2 bg-gray-700 border border-gray-600 rounded-lg min-h-[38px] max-h-[150px] sm:max-h-[200px] overflow-y-auto">
+							<span class="text-gray-400 text-sm">No tags selected</span>
+						</div>
+					</div>
+
+					<!-- Date Range Filter -->
+					<div class="flex-1">
+						<div class="flex gap-2">
+							<div class="flex-1">
+								<label class="block text-xs text-gray-400 mb-1">From Date</label>
+								<input type="date" id="dateFrom"
+									class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-red-500 text-sm">
+							</div>
+							<div class="flex-1">
+								<label class="block text-xs text-gray-400 mb-1">To Date</label>
+								<input type="date" id="dateTo"
+									class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-red-500 text-sm">
+							</div>
+						</div>
+					</div>
+
+					<!-- Clear Filters Button -->
+					<div class="flex items-end">
+						<button id="clearFilters"
+							class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition whitespace-nowrap">
+							Clear Filters
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+		</div>
+	</header>
+
+	<main class="max-w-7xl mx-auto px-2 sm:px-4 py-3 sm:py-6">
+		<!-- User Profile Section -->
+		<div id="userProfile" class="hidden mb-4 sm:mb-6 p-3 sm:p-4 bg-gray-800 rounded-xl">
+			<div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+				<img id="userAvatar" src="" alt="Avatar" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover bg-gray-700">
+				<div class="flex-1 w-full">
+					<div class="flex items-center gap-2 flex-wrap">
+						<h2 id="userName" class="text-lg sm:text-xl font-bold"></h2>
+						<span id="verifiedBadge" class="hidden px-2 py-0.5 bg-blue-600 text-xs rounded-full">Verified</span>
+					</div>
+					<p id="userDesc" class="text-gray-400 text-xs sm:text-sm mt-1 line-clamp-2"></p>
+					<div class="flex flex-wrap gap-3 sm:gap-4 mt-2 text-xs sm:text-sm">
+						<span class="text-gray-400"><span id="userGifs" class="text-white font-medium">0</span> gifs</span>
+						<span class="text-gray-400"><span id="userViews" class="text-white font-medium">0</span> views</span>
+						<span class="text-gray-400"><span id="userFollowers" class="text-white font-medium">0</span>
+							followers</span>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Controls -->
+		<div id="controls" class="hidden mb-4">
+			<div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+				<div class="flex flex-wrap gap-2 items-center">
+					<span class="text-gray-400 text-sm">Sort by:</span>
+
+					<!-- API Sort (determines what data we fetch) -->
+					<select id="apiSort"
+						class="px-3 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-red-500">
+						<option value="latest">Latest</option>
+						<option value="trending">Trending</option>
+						<option value="top">Top (All Time)</option>
+						<option value="top7">Top (Week)</option>
+						<option value="top28">Top (Month)</option>
+					</select>
+
+					<!-- Client-side sort for loaded data -->
+					<select id="clientSort"
+						class="px-3 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-red-500">
+						<option value="default">Default Order</option>
+						<option value="views-desc">Most Views</option>
+						<option value="views-asc">Least Views</option>
+						<option value="likes-desc">Most Likes</option>
+						<option value="likes-asc">Least Likes</option>
+						<option value="duration-desc">Longest</option>
+						<option value="duration-asc">Shortest</option>
+						<option value="date-desc">Newest</option>
+						<option value="date-asc">Oldest</option>
+					</select>
+				</div>
+
+				<div class="text-sm text-gray-400">
+					<span id="resultCount">0</span> results
+					<span id="pageInfo" class="ml-2"></span>
+				</div>
+			</div>
+		</div>
+
+		<!-- Loading State -->
+		<div id="loading" class="hidden flex justify-center items-center py-20">
+			<div class="spinner"></div>
+		</div>
+
+		<!-- Empty State -->
+		<div id="emptyState" class="text-center py-20 text-gray-500">
+			<svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+					d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+			</svg>
+			<p class="text-lg">Enter a username to browse their gifs</p>
+			<p class="text-sm mt-2">You can sort results by views, likes, or duration</p>
+		</div>
+
+		<!-- Error State -->
+		<div id="errorState" class="hidden text-center py-20 text-red-400">
+			<svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+					d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+				</path>
+			</svg>
+			<p id="errorMessage" class="text-lg">An error occurred</p>
+		</div>
+
+		<!-- Gif Grid -->
+		<div id="gifGrid" class="gif-grid"></div>
+
+		<!-- Load More Button -->
+		<div id="loadMoreContainer" class="hidden text-center mt-8">
+			<button id="loadMoreBtn" class="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium transition">
+				Load More
+			</button>
+		</div>
+	</main>
+
+	<!-- Video Modal -->
+	<div id="videoModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-2 sm:p-4">
+		<button id="closeModal" class="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-white hover:text-gray-300 transition z-10">
+			<svg class="w-6 h-6 sm:w-8 sm:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+			</svg>
+		</button>
+
+		<div class="max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] flex flex-col">
+			<div class="relative bg-black rounded-lg overflow-hidden">
+				<video id="modalVideo" controls autoplay loop class="w-full max-h-[60vh] sm:max-h-[70vh]">
+					<source src="" type="video/mp4">
+				</video>
+			</div>
+
+			<div class="mt-2 sm:mt-4 bg-gray-800 rounded-lg p-3 sm:p-4">
+				<div class="flex flex-wrap gap-4 text-sm">
+					<span class="flex items-center gap-1">
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+							<path fill-rule="evenodd"
+								d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+								clip-rule="evenodd" />
+						</svg>
+						<span id="modalViews">0</span> views
+					</span>
+					<span class="flex items-center gap-1">
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path fill-rule="evenodd"
+								d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"
+								clip-rule="evenodd" />
+						</svg>
+						<span id="modalLikes">0</span> likes
+					</span>
+					<span class="flex items-center gap-1">
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path fill-rule="evenodd"
+								d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+								clip-rule="evenodd" />
+						</svg>
+						<span id="modalDuration">0</span>s
+					</span>
+					<span id="modalAudio" class="hidden flex items-center gap-1 text-green-400">
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path fill-rule="evenodd"
+								d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z"
+								clip-rule="evenodd" />
+						</svg>
+						Has Audio
+					</span>
+				</div>
+				<div id="modalTags" class="mt-2 sm:mt-3 flex flex-wrap gap-1 sm:gap-2 max-h-[80px] sm:max-h-[100px] overflow-y-auto"></div>
+				<div class="mt-2 sm:mt-3 flex flex-col sm:flex-row gap-2">
+					<a id="modalLink" href="#" target="_blank"
+						class="px-3 py-2 sm:py-1.5 bg-red-600 hover:bg-red-700 rounded text-sm transition text-center">
+						Open on RedGifs
+					</a>
+					<a id="modalDownload" href="#" target="_blank"
+						class="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 rounded text-sm transition text-center">
+						Download HD
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		// State
+		let currentUser = '';
+		let currentUsers = [];
+		let currentPage = 1;
+		let totalPages = 1;
+		let allGifs = [];
+		let displayedGifs = [];
+		let apiOrder = 'latest';
+		let allTags = new Set();
+		let currentGifIndex = -1;
+
+		// DOM Elements
+		const searchForm = document.getElementById('searchForm');
+		const searchInput = document.getElementById('searchInput');
+		const userProfile = document.getElementById('userProfile');
+		const controls = document.getElementById('controls');
+		const gifGrid = document.getElementById('gifGrid');
+		const loading = document.getElementById('loading');
+		const emptyState = document.getElementById('emptyState');
+		const errorState = document.getElementById('errorState');
+		const loadMoreContainer = document.getElementById('loadMoreContainer');
+		const loadMoreBtn = document.getElementById('loadMoreBtn');
+		const apiSortSelect = document.getElementById('apiSort');
+		const clientSortSelect = document.getElementById('clientSort');
+		const videoModal = document.getElementById('videoModal');
+		const filtersSection = document.getElementById('filtersSection');
+		const tagFilterContainer = document.getElementById('tagFilterContainer');
+		const tagFilterToggle = document.getElementById('tagFilterToggle');
+		const tagFilterIcon = document.getElementById('tagFilterIcon');
+		const dateFrom = document.getElementById('dateFrom');
+		const dateTo = document.getElementById('dateTo');
+		const clearFiltersBtn = document.getElementById('clearFilters');
+		let selectedTags = new Set();
+		let tagFilterExpanded = true;
+
+		// Utility functions
+		function proxyUrl(url) {
+			// Proxy media URLs through our backend to avoid CORB/ORB issues
+			if (!url) return '';
+			return `/proxy?url=${encodeURIComponent(url)}`;
+		}
+
+		function formatNumber(num) {
+			if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+			if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+			return num.toString();
+		}
+
+		function formatDuration(seconds) {
+			const mins = Math.floor(seconds / 60);
+			const secs = Math.floor(seconds % 60);
+			return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
+		}
+
+		function showLoading() {
+			loading.classList.remove('hidden');
+			emptyState.classList.add('hidden');
+			errorState.classList.add('hidden');
+		}
+
+		function hideLoading() {
+			loading.classList.add('hidden');
+		}
+
+		function showError(message) {
+			errorState.classList.remove('hidden');
+			document.getElementById('errorMessage').textContent = message;
+			emptyState.classList.add('hidden');
+		}
+
+		function hideError() {
+			errorState.classList.add('hidden');
+		}
+
+		// Sort gifs based on client-side sort selection
+		function sortGifs(gifs, sortBy) {
+			const sorted = [...gifs];
+			switch (sortBy) {
+				case 'views-desc':
+					return sorted.sort((a, b) => (b.views || 0) - (a.views || 0));
+				case 'views-asc':
+					return sorted.sort((a, b) => (a.views || 0) - (b.views || 0));
+				case 'likes-desc':
+					return sorted.sort((a, b) => b.likes - a.likes);
+				case 'likes-asc':
+					return sorted.sort((a, b) => a.likes - b.likes);
+				case 'duration-desc':
+					return sorted.sort((a, b) => b.duration - a.duration);
+				case 'duration-asc':
+					return sorted.sort((a, b) => a.duration - b.duration);
+				case 'date-desc':
+					return sorted.sort((a, b) => new Date(b.create_date) - new Date(a.create_date));
+				case 'date-asc':
+					return sorted.sort((a, b) => new Date(a.create_date) - new Date(b.create_date));
+				default:
+					return sorted;
+			}
+		}
+
+		// Create gif card HTML
+		function createGifCard(gif, index) {
+			const card = document.createElement('div');
+			card.className = 'gif-card relative rounded-lg overflow-hidden bg-gray-800 cursor-pointer group';
+			card.style.aspectRatio = '16/9';
+			card.style.backgroundColor = gif.avg_color || '#1f2937';
+
+			card.innerHTML = `
+                <img
+                    src="${proxyUrl(gif.urls.thumbnail)}"
+                    alt="Gif thumbnail"
+                    class="w-full h-full object-cover"
+                    loading="lazy"
+                >
+                <div class="play-overlay absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity">
+                    <svg class="w-16 h-16 text-white/90" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                    <div class="flex items-center justify-between text-xs text-white">
+                        <div class="flex items-center gap-2">
+                            <span class="stat-badge px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                                    <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
+                                </svg>
+                                ${formatNumber(gif.views || 0)}
+                            </span>
+                            <span class="stat-badge px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"/>
+                                </svg>
+                                ${formatNumber(gif.likes)}
+                            </span>
+													<span class="stat-badge px-1.5 py-0.5 rounded">${gif.create_date.split('T')[0]}</span>
+                        </div>
+                        <span class="stat-badge px-1.5 py-0.5 rounded">${formatDuration(gif.duration)}</span>
+                    </div>
+                </div>
+                ${gif.has_audio ? `
+                    <div class="absolute top-2 right-2">
+                        <span class="stat-badge px-1.5 py-0.5 rounded text-xs flex items-center gap-1 text-green-400">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                            </svg>
+                        </span>
+                    </div>
+                ` : ''}
+            `;
+
+			card.addEventListener('click', () => openModal(gif, index));
+			return card;
+		}
+
+		// Render gifs to grid
+		function renderGifs(gifs) {
+			gifGrid.innerHTML = '';
+			gifs.forEach((gif, index) => {
+				gifGrid.appendChild(createGifCard(gif, index));
+			});
+		}
+
+		// Collect all unique tags from gifs
+		function collectTags(gifs) {
+			allTags.clear();
+			gifs.forEach(gif => {
+				if (gif.tags && Array.isArray(gif.tags)) {
+					gif.tags.forEach(tag => allTags.add(tag));
+				}
+			});
+			updateTagFilter();
+		}
+
+		// Update tag filter with clickable tags
+		function updateTagFilter() {
+			tagFilterContainer.innerHTML = '';
+
+			const sortedTags = Array.from(allTags).sort();
+
+			if (sortedTags.length === 0) {
+				const placeholder = document.createElement('span');
+				placeholder.className = 'text-gray-400 text-sm';
+				placeholder.textContent = 'No tags available';
+				tagFilterContainer.appendChild(placeholder);
+				return;
+			}
+
+			// Create tag buttons
+			sortedTags.forEach(tag => {
+				const tagBtn = document.createElement('button');
+				tagBtn.type = 'button';
+				tagBtn.className = 'px-2 py-1 text-xs rounded transition-colors';
+				tagBtn.textContent = tag;
+
+				const isSelected = selectedTags.has(tag);
+				if (isSelected) {
+					tagBtn.className += ' bg-red-600 text-white hover:bg-red-700';
+				} else {
+					tagBtn.className += ' bg-gray-600 text-gray-200 hover:bg-gray-500';
+				}
+
+				tagBtn.addEventListener('click', () => {
+					if (selectedTags.has(tag)) {
+						selectedTags.delete(tag);
+					} else {
+						selectedTags.add(tag);
+					}
+					updateTagFilter();
+					applyFilters();
+				});
+
+				tagFilterContainer.appendChild(tagBtn);
+			});
+		}
+
+		// Apply filters to gifs
+		function applyFilters() {
+			let filtered = [...allGifs];
+
+			// Filter by tags (multiple selection - must have ALL selected tags)
+			if (selectedTags.size > 0) {
+				filtered = filtered.filter(gif => {
+					if (!gif.tags) return false;
+					// Check if gif has all selected tags
+					return Array.from(selectedTags).every(tag => gif.tags.includes(tag));
+				});
+			}
+
+			// Filter by date range
+			const fromDate = dateFrom.value ? new Date(dateFrom.value) : null;
+			const toDate = dateTo.value ? new Date(dateTo.value + 'T23:59:59') : null;
+
+			if (fromDate || toDate) {
+				filtered = filtered.filter(gif => {
+					const gifDate = new Date(gif.create_date);
+					if (fromDate && gifDate < fromDate) return false;
+					if (toDate && gifDate > toDate) return false;
+					return true;
+				});
+			}
+
+			// Apply client-side sort to filtered results
+			displayedGifs = sortGifs(filtered, clientSortSelect.value);
+			renderGifs(displayedGifs);
+		}
+
+		// Update user profile UI
+		function updateUserProfile(user) {
+			if (!user) {
+				userProfile.classList.add('hidden');
+				return;
+			}
+
+			userProfile.classList.remove('hidden');
+			document.getElementById('userAvatar').src = proxyUrl(user.profile_image_url || user.thumbnail) || '';
+			document.getElementById('userName').textContent = user.name || user.username;
+			document.getElementById('userDesc').textContent = user.description || '';
+			document.getElementById('userGifs').textContent = formatNumber(user.published_gifs || user.gifs || 0);
+			document.getElementById('userViews').textContent = formatNumber(user.views || 0);
+			document.getElementById('userFollowers').textContent = formatNumber(user.followers || 0);
+
+			const verifiedBadge = document.getElementById('verifiedBadge');
+			if (user.verified) {
+				verifiedBadge.classList.remove('hidden');
+			} else {
+				verifiedBadge.classList.add('hidden');
+			}
+		}
+
+		// Fetch user gifs
+		async function fetchUserGifs(username, page = 1, order = 'latest', append = false) {
+			if (!append) {
+				showLoading();
+				allGifs = [];
+			}
+
+			try {
+				const response = await fetch(`/api/user/${encodeURIComponent(username)}/gifs?page=${page}&count=80&order=${order}`);
+				if (!response.ok) {
+					throw new Error('User not found');
+				}
+				const data = await response.json();
+
+				if (append) {
+					allGifs = [...allGifs, ...data.gifs];
+				} else {
+					allGifs = data.gifs;
+					updateUserProfile(data.creator);
+				}
+
+				currentPage = data.page;
+				totalPages = data.pages;
+
+				// Collect tags and show filter section
+				collectTags(allGifs);
+				filtersSection.classList.remove('hidden');
+
+				// Apply filters and client-side sort
+				applyFilters();
+
+				// Update UI
+				document.getElementById('resultCount').textContent = formatNumber(data.total);
+				document.getElementById('pageInfo').textContent = `(Page ${currentPage}/${totalPages})`;
+
+				controls.classList.remove('hidden');
+				emptyState.classList.add('hidden');
+				hideError();
+
+				// Auto-prefetch up to 10 pages
+				if (!append && currentPage === 1 && totalPages > 1) {
+					const pagesToFetch = Math.min(10, totalPages);
+					prefetchPages(username, pagesToFetch, order);
+				}
+
+				// Show/hide load more button
+				if (currentPage < totalPages) {
+					loadMoreContainer.classList.remove('hidden');
+				} else {
+					loadMoreContainer.classList.add('hidden');
+				}
+
+			} catch (error) {
+				showError(error.message);
+				controls.classList.add('hidden');
+				gifGrid.innerHTML = '';
+			} finally {
+				hideLoading();
+			}
+		}
+
+		// Prefetch multiple pages in background
+		async function prefetchPages(username, maxPages, order) {
+			const promises = [];
+
+			for (let p = 2; p <= maxPages; p++) {
+				promises.push(
+					fetch(`/api/user/${encodeURIComponent(username)}/gifs?page=${p}&count=80&order=${order}`)
+						.then(res => res.ok ? res.json() : null)
+						.catch(() => null)
+				);
+			}
+
+			const results = await Promise.all(promises);
+
+			// Combine all fetched gifs
+			results.forEach(data => {
+				if (data && data.gifs) {
+					allGifs = [...allGifs, ...data.gifs];
+				}
+			});
+
+			// Update with all collected gifs
+			if (allGifs.length > 0) {
+				collectTags(allGifs);
+				applyFilters();
+
+				// Update page info
+				document.getElementById('pageInfo').textContent = `(Loaded ${Math.min(maxPages, totalPages)} of ${totalPages} pages)`;
+
+				// Hide load more if we fetched all pages
+				if (maxPages >= totalPages) {
+					loadMoreContainer.classList.add('hidden');
+				}
+			}
+		}
+
+		// Fetch gifs from multiple users
+		async function fetchMultipleUserGifs(usernames, order = 'latest') {
+			showLoading();
+			allGifs = [];
+			let allUsersData = [];
+
+			try {
+				// Fetch gifs from all users in parallel
+				const promises = usernames.map(username =>
+					fetch(`/api/user/${encodeURIComponent(username)}/gifs?page=1&count=80&order=${order}`)
+						.then(res => res.ok ? res.json() : null)
+						.catch(() => null)
+				);
+
+				const results = await Promise.all(promises);
+
+				// Combine all gifs
+				results.forEach((data, index) => {
+					if (data && data.gifs) {
+						allGifs = [...allGifs, ...data.gifs];
+						if (data.creator) {
+							allUsersData.push(data.creator);
+						}
+					}
+				});
+
+				if (allGifs.length === 0) {
+					throw new Error('No gifs found for the specified users');
+				}
+
+				// Update profile section to show multiple users
+				updateMultipleUsersProfile(allUsersData);
+
+				// Collect tags and show filter section
+				collectTags(allGifs);
+				filtersSection.classList.remove('hidden');
+
+				// Apply filters and client-side sort
+				applyFilters();
+
+				// Update UI
+				document.getElementById('resultCount').textContent = formatNumber(allGifs.length);
+				document.getElementById('pageInfo').textContent = `(${usernames.length} users)`;
+
+				controls.classList.remove('hidden');
+				emptyState.classList.add('hidden');
+				hideError();
+
+				// Hide load more button for multi-user search
+				loadMoreContainer.classList.add('hidden');
+
+			} catch (error) {
+				showError(error.message);
+				controls.classList.add('hidden');
+				gifGrid.innerHTML = '';
+			} finally {
+				hideLoading();
+			}
+		}
+
+		// Update profile for multiple users
+		function updateMultipleUsersProfile(users) {
+			if (!users || users.length === 0) {
+				userProfile.classList.add('hidden');
+				return;
+			}
+
+			userProfile.classList.remove('hidden');
+
+			// Show first user's avatar or placeholder
+			const firstUser = users[0];
+			document.getElementById('userAvatar').src = proxyUrl(firstUser.profile_image_url || firstUser.thumbnail) || '';
+			document.getElementById('userName').textContent = `${users.length} Users`;
+			document.getElementById('userDesc').textContent = users.map(u => u.name || u.username).join(', ');
+
+			// Calculate combined stats
+			const totalGifs = users.reduce((sum, u) => sum + (u.published_gifs || u.gifs || 0), 0);
+			const totalViews = users.reduce((sum, u) => sum + (u.views || 0), 0);
+			const totalFollowers = users.reduce((sum, u) => sum + (u.followers || 0), 0);
+
+			document.getElementById('userGifs').textContent = formatNumber(totalGifs);
+			document.getElementById('userViews').textContent = formatNumber(totalViews);
+			document.getElementById('userFollowers').textContent = formatNumber(totalFollowers);
+
+			// Hide verified badge for multi-user
+			document.getElementById('verifiedBadge').classList.add('hidden');
+		}
+
+		// Open video modal
+		function openModal(gif, index = -1) {
+			currentGifIndex = index;
+
+			const video = document.getElementById('modalVideo');
+			video.src = proxyUrl(gif.urls.hd || gif.urls.sd);
+			video.load();
+
+			document.getElementById('modalViews').textContent = formatNumber(gif.views || 0);
+			document.getElementById('modalLikes').textContent = formatNumber(gif.likes);
+			document.getElementById('modalDuration').textContent = gif.duration.toFixed(1);
+			document.getElementById('modalLink').href = gif.urls.web_url;
+			document.getElementById('modalDownload').href = gif.urls.hd && proxyUrl(gif.urls.hd) || gif.urls.sd && proxyUrl(gif.urls.sd);
+
+			const audioIndicator = document.getElementById('modalAudio');
+			if (gif.has_audio) {
+				audioIndicator.classList.remove('hidden');
+			} else {
+				audioIndicator.classList.add('hidden');
+			}
+
+			// Render tags
+			const tagsContainer = document.getElementById('modalTags');
+			tagsContainer.innerHTML = gif.tags.slice(0, 10).map(tag =>
+				`<span class="px-2 py-1 bg-gray-700 rounded text-xs">${tag}</span>`
+			).join('');
+
+			videoModal.classList.remove('hidden');
+			document.body.style.overflow = 'hidden';
+		}
+
+		// Navigate to next/previous gif in modal
+		function navigateModal(direction) {
+			if (currentGifIndex === -1 || displayedGifs.length === 0) return;
+
+			let newIndex = currentGifIndex + direction;
+			if (newIndex < 0) newIndex = displayedGifs.length - 1;
+			if (newIndex >= displayedGifs.length) newIndex = 0;
+
+			openModal(displayedGifs[newIndex], newIndex);
+		}
+
+		// Close video modal
+		function closeModal() {
+			videoModal.classList.add('hidden');
+			document.body.style.overflow = '';
+			const video = document.getElementById('modalVideo');
+			video.pause();
+			video.src = '';
+		}
+
+		// Event Listeners
+		searchForm.addEventListener('submit', (e) => {
+			e.preventDefault();
+			const input = searchInput.value.trim();
+			if (input) {
+				// Check if multiple usernames (comma-separated)
+				const usernames = input.split(',').map(u => u.trim()).filter(u => u);
+
+				if (usernames.length > 1) {
+					currentUsers = usernames;
+					currentUser = '';
+					apiOrder = apiSortSelect.value;
+					clientSortSelect.value = 'default';
+					fetchMultipleUserGifs(usernames, apiOrder);
+				} else {
+					currentUser = usernames[0];
+					currentUsers = [];
+					currentPage = 1;
+					apiOrder = apiSortSelect.value;
+					clientSortSelect.value = 'default';
+					fetchUserGifs(usernames[0], 1, apiOrder);
+				}
+			}
+		});
+
+		apiSortSelect.addEventListener('change', () => {
+			if (currentUser) {
+				apiOrder = apiSortSelect.value;
+				currentPage = 1;
+				clientSortSelect.value = 'default';
+				fetchUserGifs(currentUser, 1, apiOrder);
+			}
+		});
+
+		clientSortSelect.addEventListener('change', () => {
+			applyFilters();
+		});
+
+		loadMoreBtn.addEventListener('click', () => {
+			if (currentUser && currentPage < totalPages) {
+				fetchUserGifs(currentUser, currentPage + 1, apiOrder, true);
+			}
+		});
+
+		// Filter event listeners
+		tagFilterToggle.addEventListener('click', () => {
+			tagFilterExpanded = !tagFilterExpanded;
+			if (tagFilterExpanded) {
+				tagFilterContainer.classList.remove('hidden');
+				tagFilterIcon.style.transform = 'rotate(0deg)';
+			} else {
+				tagFilterContainer.classList.add('hidden');
+				tagFilterIcon.style.transform = 'rotate(-90deg)';
+			}
+		});
+
+		dateFrom.addEventListener('change', () => {
+			applyFilters();
+		});
+
+		dateTo.addEventListener('change', () => {
+			applyFilters();
+		});
+
+		clearFiltersBtn.addEventListener('click', () => {
+			selectedTags.clear();
+			dateFrom.value = '';
+			dateTo.value = '';
+			updateTagFilter();
+			applyFilters();
+		});
+
+		document.getElementById('closeModal').addEventListener('click', closeModal);
+		videoModal.addEventListener('click', (e) => {
+			if (e.target === videoModal) {
+				closeModal();
+			}
+		});
+
+		// Keyboard navigation
+		document.addEventListener('keydown', (e) => {
+			const modalOpen = !videoModal.classList.contains('hidden');
+
+			if (modalOpen) {
+				if (e.key === 'Escape') {
+					closeModal();
+				} else if (e.key === 'ArrowRight') {
+					e.preventDefault();
+					navigateModal(1);
+				} else if (e.key === 'ArrowLeft') {
+					e.preventDefault();
+					navigateModal(-1);
+				}
+			}
+		});
+
+		// Touch gesture support for modal swipe navigation
+		let touchStartX = 0;
+		let touchEndX = 0;
+
+		videoModal.addEventListener('touchstart', (e) => {
+			touchStartX = e.changedTouches[0].screenX;
+		}, { passive: true });
+
+		videoModal.addEventListener('touchend', (e) => {
+			touchEndX = e.changedTouches[0].screenX;
+			handleSwipe();
+		}, { passive: true });
+
+		function handleSwipe() {
+			const swipeThreshold = 50;
+			const diff = touchStartX - touchEndX;
+
+			if (Math.abs(diff) > swipeThreshold) {
+				if (diff > 0) {
+					// Swipe left - next gif
+					navigateModal(1);
+				} else {
+					// Swipe right - previous gif
+					navigateModal(-1);
+				}
+			}
+		}
+
+		// Check for username in URL hash
+		if (window.location.hash) {
+			const username = window.location.hash.slice(1);
+			if (username) {
+				searchInput.value = username;
+				currentUser = username;
+				fetchUserGifs(username);
+			}
+		}
+	</script>
+</body>
+
+</html>

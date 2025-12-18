@@ -1,0 +1,19 @@
+[Unit]
+Description=Bunkr Album Scraper - FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=dietpi
+Group=dietpi
+WorkingDirectory=/home/dietpi/bunkr
+Environment="PATH=/home/dietpi/bunkr/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/dietpi/bunkr/venv/bin/python /home/dietpi/bunkr/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bunkr
+
+[Install]
+WantedBy=multi-user.target
