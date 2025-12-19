@@ -18,7 +18,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+if ! command -v docker compose &> /dev/null && ! docker compose version &> /dev/null; then
     echo "❌ Docker Compose is not installed!"
     echo "Please install Docker Compose from: https://docs.docker.com/compose/install/"
     exit 1
@@ -49,21 +49,21 @@ case $choice in
     1)
         echo ""
         echo "🚀 Starting NSRI services..."
-        docker-compose up -d
+        docker compose up -d
         echo ""
         echo "✅ Services started!"
         ;;
     2)
         echo ""
         echo "🔨 Rebuilding and starting services..."
-        docker-compose up -d --build
+        docker compose up -d --build
         echo ""
         echo "✅ Services rebuilt and started!"
         ;;
     3)
         echo ""
         echo "🛑 Stopping services..."
-        docker-compose down
+        docker compose down
         echo ""
         echo "✅ Services stopped!"
         exit 0
@@ -71,7 +71,7 @@ case $choice in
     4)
         echo ""
         echo "📋 Showing logs (Ctrl+C to exit)..."
-        docker-compose logs -f
+        docker compose logs -f
         exit 0
         ;;
     5)
@@ -80,7 +80,7 @@ case $choice in
         read -p "Are you sure? (yes/no): " confirm
         if [ "$confirm" = "yes" ]; then
             echo "🗑️  Cleaning everything..."
-            docker-compose down -v
+            docker compose down -v
             echo "✅ Everything cleaned!"
         else
             echo "❌ Cancelled"
@@ -101,7 +101,7 @@ sleep 5
 # Check service health
 echo ""
 echo "📊 Service Status:"
-docker-compose ps
+docker compose ps
 
 echo ""
 echo "✅ NSRI is ready!"
@@ -114,7 +114,7 @@ echo ""
 echo "📖 For more information, see README.docker.md"
 echo ""
 echo "💡 Quick commands:"
-echo "   View logs:      docker-compose logs -f"
-echo "   Stop services:  docker-compose down"
-echo "   Restart:        docker-compose restart"
+echo "   View logs:      docker compose logs -f"
+echo "   Stop services:  docker compose down"
+echo "   Restart:        docker compose restart"
 echo ""

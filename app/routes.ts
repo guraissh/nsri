@@ -7,6 +7,7 @@ export default [
   route("api/list-directories", "routes/api.list-directories.tsx"),
   route("api/history", "routes/api.history.tsx"),
   route("api/playlists", "routes/api.playlists.tsx"),
+  route("api/redgifs-tags", "routes/api.redgifs-tags.tsx"),
   route("proxy/media", "routes/proxy.media.tsx"),
   route("proxy/local-media", "routes/proxy.local-media.tsx"),
   route("proxy/bunkr-media", "routes/proxy.bunkr-media.tsx"),

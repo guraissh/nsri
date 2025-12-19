@@ -67,7 +67,7 @@ export const getBunkrMedia = async (
   albumUrl: string,
 ): Promise<string[]> => {
   try {
-    const bunkrBackendUrl = "http://localhost:8001";
+    const bunkrBackendUrl = process.env['BUNKR_API_URL'] ?? "http://localhost:8001";
     console.log(`Fetching Bunkr album from backend: ${albumUrl}`);
 
     // Call the Bunkr backend API

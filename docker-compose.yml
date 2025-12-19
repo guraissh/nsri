@@ -67,6 +67,8 @@ services:
     environment:
       - NODE_ENV=production
       - ROOT_DIR=/media
+      - REDGIFS_API_URL=http://redgifs:8000
+      - BUNKR_API_URL=http://bunkr:8001
     restart: unless-stopped
     depends_on:
       - bunkr

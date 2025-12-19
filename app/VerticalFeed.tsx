@@ -78,8 +78,7 @@ export const VerticalFeed = ({
             : 'http://localhost:8000';
 
           // Call verify-cache endpoint (fire and forget)
-          fetch(`${backendUrl}/verify-cache?url=${encodeURIComponent(originalUrl)}`, {
-            method: 'POST'
+          fetch(`/api/redgifs-tags?action=verify&url=${encodeURIComponent(originalUrl)}`, {
           }).catch(() => {}); // Ignore errors
         }
       } catch (e) {
@@ -146,10 +145,9 @@ export const VerticalFeed = ({
                 ? 'http://localhost:8001'
                 : 'http://localhost:8000';
 
+		  fetch(`/api/redgifs-tags?action=purge&url=${encodeURIComponent(originalUrl)}`, {
+		  }).catch(() => {}); // Ignore errors
               // Call invalidate-cache endpoint
-              fetch(`${backendUrl}/invalidate-cache?url=${encodeURIComponent(originalUrl)}`, {
-                method: 'POST'
-              }).catch(() => {});
             }
           } catch (e) {
             // Ignore URL parsing errors

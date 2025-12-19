@@ -10,7 +10,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   try {
     // Forward the request to the Bunkr backend proxy
-    const bunkrBackendUrl = "http://localhost:8001";
+    const bunkrBackendUrl = process.env['BUNKR_API_URL'] ?? "http://localhost:8001"; 
     const proxyUrl = `${bunkrBackendUrl}/proxy?url=${encodeURIComponent(mediaUrl)}`;
 
     const response = await fetch(proxyUrl, {

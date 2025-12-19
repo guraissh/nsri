@@ -3,7 +3,7 @@ FROM oven/bun:1 AS base
 WORKDIR /app
 
 # Install dependencies
-COPY package.json bun.lockb ./
+COPY package.json bun.lock netscape-cookies-parser-1.0.3.tgz app/ ./
 RUN bun install --frozen-lockfile
 
 # Copy source code
@@ -21,7 +21,7 @@ WORKDIR /app
 COPY --from=base /app/build ./build
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/package.json ./package.json
-COPY --from=base /app/server.ts ./server.ts
+COPY --from=base /app/app ./app
 
 # Create directories for data persistence
 RUN mkdir -p /app/public/thumbnails /app/data
@@ -30,4 +30,4 @@ RUN mkdir -p /app/public/thumbnails /app/data
 EXPOSE 3000
 
 # Start the server
-CMD ["bun", "run", "server.ts"]
+CMD ["bun", "run", "start"]
