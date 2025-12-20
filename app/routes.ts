@@ -1,14 +1,24 @@
 import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import { readdirSync } from "fs";
+import { join } from "path";
 
-export default [
-  index("routes/home.tsx"),
-  route("media", "routes/media.tsx"),
-  route("api/stream-media", "routes/api.stream-media.tsx"),
-  route("api/list-directories", "routes/api.list-directories.tsx"),
-  route("api/history", "routes/api.history.tsx"),
-  route("api/playlists", "routes/api.playlists.tsx"),
-  route("api/redgifs-tags", "routes/api.redgifs-tags.tsx"),
-  route("proxy/media", "routes/proxy.media.tsx"),
-  route("proxy/local-media", "routes/proxy.local-media.tsx"),
-  route("proxy/bunkr-media", "routes/proxy.bunkr-media.tsx"),
-] satisfies RouteConfig;
+// Automatically discover all route files from the routes directory
+const routesDir = join(__dirname, "routes");
+const routeFiles = readdirSync(routesDir).filter(file => file.endsWith(".tsx"));
+
+// Generate routes configuration
+const routes: RouteConfig = routeFiles.map(file => {
+  const fileName = file.replace(".tsx", "");
+
+  // Special case for home.tsx - make it the index route
+  if (fileName === "home") {
+    return index("routes/home.tsx");
+  }
+
+  // Convert dot notation to slash notation (e.g., "api.cache-stats" -> "api/cache-stats")
+  const routePath = fileName.replace(/\./g, "/");
+
+  return route(routePath, `routes/${file}`);
+});
+
+export default routes;
