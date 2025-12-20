@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, GripVertical, Trash2 } from "lucide-react";
+import type { PlaylistItem } from "./PlaylistViewer";
 
 interface Playlist {
   id: number;
@@ -7,13 +8,6 @@ interface Playlist {
   description?: string;
 }
 
-interface PlaylistItem {
-  id: number;
-  playlist_id: number;
-  media_url: string;
-  order_index: number;
-  thumbnail_path?: string | null;
-}
 
 interface PlaylistManagerProps {
   playlistId: string;
@@ -195,9 +189,8 @@ export function PlaylistManager({ playlistId, onClose, onUpdate }: PlaylistManag
                       onDragOver={(e) => handleDragOver(e, index)}
                       onDrop={(e) => handleDrop(e, index)}
                       onDragEnd={handleDragEnd}
-                      className={`flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition-colors cursor-move ${
-                        draggedIndex === index ? "opacity-50" : ""
-                      }`}
+                      className={`flex items-center gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition-colors cursor-move ${draggedIndex === index ? "opacity-50" : ""
+                        }`}
                     >
                       <GripVertical size={20} className="text-gray-500 flex-shrink-0" />
 

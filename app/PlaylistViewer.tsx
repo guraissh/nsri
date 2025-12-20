@@ -1,10 +1,11 @@
 import { X } from "lucide-react";
 
-interface PlaylistItem {
-  id: number;
+export interface PlaylistItem {
+  id?: number;
   playlist_id: number;
   media_url: string;
   order_index: number;
+  added_at?: number;
   thumbnail_path?: string | null;
 }
 
@@ -73,11 +74,10 @@ export function PlaylistViewer({
                         onJumpToVideo(index);
                         onClose();
                       }}
-                      className={`relative group rounded-lg overflow-hidden transition-all ${
-                        isCurrentVideo
+                      className={`relative group rounded-lg overflow-hidden transition-all ${isCurrentVideo
                           ? "ring-4 ring-blue-500 scale-105"
                           : "hover:scale-105 hover:ring-2 hover:ring-gray-400"
-                      }`}
+                        }`}
                     >
                       {/* Thumbnail */}
                       {item.thumbnail_path ? (
