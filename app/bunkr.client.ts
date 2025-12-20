@@ -81,5 +81,10 @@ export async function getAlbum(albumUrl: string): Promise<BunkrAlbumResponse> {
 
 	return await response.json();
 }
-const BunkrClient = { getCacheStats, clearAllCache, getAlbum }
+const BunkrClient = {
+	getCacheStats,
+	clearAllCache,
+	getAlbum
+};
+
 export default BunkrClient;

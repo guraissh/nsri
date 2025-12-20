@@ -165,6 +165,13 @@ export async function searchGifs(
 }
 
 const RedgifsClient = {
-	searchGifs, getCacheStats, getUserTags, getSelection, invalidateCache, verifyCache, clearAllCache, getUserGifs
-}
-export default RedgifsClient
+	getUserTags,
+	verifyCache,
+	invalidateCache,
+	getCacheStats,
+	clearAllCache,
+	getUserGifs,
+	searchGifs
+};
+
+export default RedgifsClient;
