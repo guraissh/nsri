@@ -376,11 +376,6 @@ export default function Media() {
         return;
       }
 
-      // Determine backend URL from proxy path
-      const backendUrl = src.includes('/proxy/bunkr-media')
-        ? (process.env.BUNKR_API_URL || 'http://localhost:8001')
-        : (process.env.REDGIFS_API_URL || 'http://localhost:8000');
-
       // Call invalidate-cache endpoint
       const response = await fetch(`/api/redgifs-tags?action=purge&url=${encodeURIComponent(originalUrl)}`, {
         method: 'POST'

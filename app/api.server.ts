@@ -6,21 +6,8 @@ import path from "path";
 import { getVideoDurationInSeconds } from "get-video-duration";
 import { getFileCache, type FileRecord } from "./fileCache.server";
 import * as cheerio from "cheerio";
-
-// RedGifs API types
-interface RedgifsGif {
-  id: string;
-  urls: {
-    sd: string;
-    hd: string;
-    poster: string;
-    thumbnail: string;
-  };
-  duration: number;
-  views: number;
-  likes: number;
-  tags: string[];
-}
+import * as RedgifsClient from "~/lib/redgifs.client";
+import * as BunkrClient from "~/lib/bunkr.client";
 
 // Helper function to create cookie string from parsed cookies for session
 const getCookieString = () => {
@@ -67,23 +54,13 @@ export const getBunkrMedia = async (
   albumUrl: string,
 ): Promise<string[]> => {
   try {
-    const bunkrBackendUrl = process.env['BUNKR_API_URL'] ?? "http://localhost:8001";
     console.log(`Fetching Bunkr album from backend: ${albumUrl}`);
 
-    // Call the Bunkr backend API
-    const response = await fetch(
-      `${bunkrBackendUrl}/api/album?url=${encodeURIComponent(albumUrl)}`,
-    );
-
-    if (!response.ok) {
-      throw new Error(`Bunkr backend error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    const data = await BunkrClient.getAlbum(albumUrl);
     console.log(`Retrieved ${data.total_items} items from Bunkr album`);
 
     // Proxy the CDN URLs through our backend to add CORS headers
-    const mediaUrls = data.media.map((item: any) => {
+    const mediaUrls = data.media.map((item) => {
       const proxiedUrl = `/proxy/bunkr-media?url=${encodeURIComponent(item.url)}`;
       return proxiedUrl;
     });
@@ -482,99 +459,54 @@ export const getRedgifsMedia = async (
   const mediaUrls: string[] = [];
 
   try {
-    // RedGifs backend is expected to be running at localhost:8000
-    const redgifsBaseUrl = process.env.REDGIFS_API_URL || "http://localhost:8000";
-
     // Normalize order parameter - backend expects "duration-desc" not "duration_desc"
     const normalizedOrder = order.replace(/_/g, "-");
+
+    let data: RedgifsClient.RedgifsGifsResponse;
 
     if (username) {
       // Fetch user's gifs
       console.log(`Fetching RedGifs for user: ${username}, order: ${normalizedOrder}, page: ${page}, count: ${count}`);
-
-      const url = new URL(`${redgifsBaseUrl}/api/user/${username}/gifs`);
-      url.searchParams.set("page", page.toString());
-      url.searchParams.set("count", count.toString());
-      url.searchParams.set("order", normalizedOrder);
-
-      const response = await fetch(url.toString());
-
-      if (!response.ok) {
-        throw new Error(`RedGifs API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (data.gifs && Array.isArray(data.gifs)) {
-        let gifs = data.gifs as RedgifsGif[];
-
-        // Filter by tags if provided
-        if (tags) {
-          const tagList = tags.split(",").map(t => t.trim().toLowerCase()).filter(t => t.length > 0);
-          if (tagList.length > 0) {
-            console.log(`Filtering by tags: ${tagList.join(", ")}`);
-            gifs = gifs.filter(gif =>
-              gif.tags && gif.tags.some(tag =>
-                tagList.some(searchTag => tag.toLowerCase().includes(searchTag))
-              )
-            );
-            console.log(`After tag filtering: ${gifs.length} gifs`);
-          }
-        }
-
-        // Note: limit parameter is ignored for RedGifs - use count parameter instead
-        // RedGifs backend handles pagination and multi-page fetching
-
-        // Extract video URLs (prefer HD, fallback to SD)
-        for (const gif of gifs) {
-          const videoUrl = gif.urls.hd || gif.urls.sd;
-          if (videoUrl) {
-            // Proxy through our backend to avoid CORS issues
-            const proxiedUrl = `/proxy/media?url=${encodeURIComponent(videoUrl)}`;
-            mediaUrls.push(proxiedUrl);
-          }
-        }
-
-        console.log(`Returning ${mediaUrls.length} RedGifs videos`);
-      }
+      data = await RedgifsClient.getUserGifs(username, normalizedOrder, page, count);
     } else if (tags) {
       // Search by tags only
       console.log(`Searching RedGifs by tags: ${tags}`);
-
-      const url = new URL(`${redgifsBaseUrl}/api/search`);
-      url.searchParams.set("q", tags);
-      url.searchParams.set("page", page.toString());
-      url.searchParams.set("count", count.toString());
-      url.searchParams.set("order", normalizedOrder);
-
-      const response = await fetch(url.toString());
-
-      if (!response.ok) {
-        throw new Error(`RedGifs API error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (data.gifs && Array.isArray(data.gifs)) {
-        const gifs = data.gifs as RedgifsGif[];
-
-        // Note: limit parameter is ignored for RedGifs - use count parameter instead
-        // RedGifs backend handles pagination and multi-page fetching
-
-        // Extract video URLs (prefer HD, fallback to SD)
-        for (const gif of gifs) {
-          const videoUrl = gif.urls.hd || gif.urls.sd;
-          if (videoUrl) {
-            // Proxy through our backend to avoid CORS issues
-            const proxiedUrl = `/proxy/media?url=${encodeURIComponent(videoUrl)}`;
-            mediaUrls.push(proxiedUrl);
-          }
-        }
-
-        console.log(`Returning ${mediaUrls.length} RedGifs videos from search`);
-      }
+      data = await RedgifsClient.searchGifs(tags, normalizedOrder, page, count);
     } else {
       throw new Error("Either username or tags must be provided for RedGifs");
+    }
+
+    if (data.gifs && Array.isArray(data.gifs)) {
+      let gifs = data.gifs;
+
+      // Filter by tags if provided (only when fetching by username)
+      if (username && tags) {
+        const tagList = tags.split(",").map(t => t.trim().toLowerCase()).filter(t => t.length > 0);
+        if (tagList.length > 0) {
+          console.log(`Filtering by tags: ${tagList.join(", ")}`);
+          gifs = gifs.filter(gif =>
+            gif.tags && gif.tags.some(tag =>
+              tagList.some(searchTag => tag.toLowerCase().includes(searchTag))
+            )
+          );
+          console.log(`After tag filtering: ${gifs.length} gifs`);
+        }
+      }
+
+      // Note: limit parameter is ignored for RedGifs - use count parameter instead
+      // RedGifs backend handles pagination and multi-page fetching
+
+      // Extract video URLs (prefer HD, fallback to SD)
+      for (const gif of gifs) {
+        const videoUrl = gif.urls.hd || gif.urls.sd;
+        if (videoUrl) {
+          // Proxy through our backend to avoid CORS issues
+          const proxiedUrl = `/proxy/media?url=${encodeURIComponent(videoUrl)}`;
+          mediaUrls.push(proxiedUrl);
+        }
+      }
+
+      console.log(`Returning ${mediaUrls.length} RedGifs videos`);
     }
 
     return mediaUrls;

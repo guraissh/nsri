@@ -268,12 +268,12 @@ export default function Home() {
   const fetchCacheStats = async () => {
     setLoadingCacheStats(true);
     try {
-      const [bunkr, rg] = await Promise.all([
-        fetch('http://localhost:8001/cache-stats').then(r => r.json()).catch(() => null),
-        fetch('http://localhost:8000/cache-stats').then(r => r.json()).catch(() => null)
-      ]);
-      setBunkrCacheStats(bunkr);
-      setRedgifsCacheStats(rg);
+      const response = await fetch('/api/cache-stats');
+      if (response.ok) {
+        const data = await response.json();
+        setBunkrCacheStats(data.bunkr);
+        setRedgifsCacheStats(data.redgifs);
+      }
     } catch (error) {
       console.error('Error fetching cache stats:', error);
     } finally {
@@ -286,7 +286,7 @@ export default function Home() {
       return;
     }
     try {
-      const response = await fetch('http://localhost:8001/clear-all-cache', {
+      const response = await fetch('/api/clear-cache?backend=bunkr', {
         method: 'POST'
       });
       if (response.ok) {
@@ -307,7 +307,7 @@ export default function Home() {
       return;
     }
     try {
-      const response = await fetch('http://localhost:8000/clear-all-cache', {
+      const response = await fetch('/api/clear-cache?backend=redgifs', {
         method: 'POST'
       });
       if (response.ok) {
