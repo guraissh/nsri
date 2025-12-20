@@ -3,7 +3,7 @@ import { useNavigate, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
 import { FolderBrowser } from "~/FolderBrowser";
 import { PlaylistManager } from "~/PlaylistManager";
-import { X, Clock, Folder, ListVideo, Edit2, Check, Globe } from "lucide-react";
+import { X, Clock, Folder, ListVideo, Edit2, Check, Globe, Trash2 } from "lucide-react";
 
 interface HistoryEntry {
   id: number;
@@ -86,6 +86,11 @@ export default function Home() {
   const [videoTags, setVideoTags] = useState<Record<string, string[]>>({});
   const [allTagCounts, setAllTagCounts] = useState<Record<string, number>>({});
   const [filteredTagCounts, setFilteredTagCounts] = useState<Record<string, number>>({});
+
+  // Cache management state
+  const [bunkrCacheStats, setBunkrCacheStats] = useState<any>(null);
+  const [redgifsCacheStats, setRedgifsCacheStats] = useState<any>(null);
+  const [loadingCacheStats, setLoadingCacheStats] = useState(false);
 
   // Load history on mount and set default source
   useEffect(() => {
@@ -254,6 +259,69 @@ export default function Home() {
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [showTagDropdown]);
+
+  // Fetch cache stats on mount
+  useEffect(() => {
+    fetchCacheStats();
+  }, []);
+
+  const fetchCacheStats = async () => {
+    setLoadingCacheStats(true);
+    try {
+      const [bunkr, rg] = await Promise.all([
+        fetch('http://localhost:8001/cache-stats').then(r => r.json()).catch(() => null),
+        fetch('http://localhost:8000/cache-stats').then(r => r.json()).catch(() => null)
+      ]);
+      setBunkrCacheStats(bunkr);
+      setRedgifsCacheStats(rg);
+    } catch (error) {
+      console.error('Error fetching cache stats:', error);
+    } finally {
+      setLoadingCacheStats(false);
+    }
+  };
+
+  const clearBunkrCache = async () => {
+    if (!confirm('Are you sure you want to clear all Bunkr cached videos?')) {
+      return;
+    }
+    try {
+      const response = await fetch('http://localhost:8001/clear-all-cache', {
+        method: 'POST'
+      });
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Cleared ${result.files_deleted} files, freed ${result.mb_freed} MB`);
+        fetchCacheStats();
+      } else {
+        alert('Failed to clear cache');
+      }
+    } catch (error) {
+      console.error('Error clearing Bunkr cache:', error);
+      alert('Error clearing cache');
+    }
+  };
+
+  const clearRedgifsCache = async () => {
+    if (!confirm('Are you sure you want to clear all RedGifs cached videos?')) {
+      return;
+    }
+    try {
+      const response = await fetch('http://localhost:8000/clear-all-cache', {
+        method: 'POST'
+      });
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Cleared ${result.files_deleted} files, freed ${result.mb_freed} MB`);
+        fetchCacheStats();
+      } else {
+        alert('Failed to clear cache');
+      }
+    } catch (error) {
+      console.error('Error clearing RedGifs cache:', error);
+      alert('Error clearing cache');
+    }
+  };
 
   // Helper function to prepopulate form from latest history entry
   const prepopulateFromHistory = (sourceType: string) => {
@@ -1211,6 +1279,106 @@ export default function Home() {
           Start Media Stream
         </button>
       </form>
+
+      {/* Cache Management */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+          <Trash2 size={18} />
+          Cache Management
+        </h2>
+
+        {loadingCacheStats ? (
+          <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+            Loading cache statistics...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Bunkr Cache */}
+            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Bunkr Cache</h3>
+              {bunkrCacheStats ? (
+                <>
+                  <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300 mb-4">
+                    <div className="flex justify-between">
+                      <span>Total Files:</span>
+                      <span className="font-medium">{bunkrCacheStats.total_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Verified:</span>
+                      <span className="font-medium text-green-600 dark:text-green-400">{bunkrCacheStats.verified_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Unverified:</span>
+                      <span className="font-medium text-yellow-600 dark:text-yellow-400">{bunkrCacheStats.unverified_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Size Used:</span>
+                      <span className="font-medium">{bunkrCacheStats.total_mb} MB / {bunkrCacheStats.max_cache_mb} MB</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Max File Size:</span>
+                      <span className="font-medium">{bunkrCacheStats.max_file_mb} MB</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearBunkrCache}
+                    className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Clear Bunkr Cache
+                  </button>
+                </>
+              ) : (
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  Unable to connect to Bunkr backend
+                </div>
+              )}
+            </div>
+
+            {/* RedGifs Cache */}
+            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">RedGifs Cache</h3>
+              {redgifsCacheStats ? (
+                <>
+                  <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300 mb-4">
+                    <div className="flex justify-between">
+                      <span>Total Files:</span>
+                      <span className="font-medium">{redgifsCacheStats.total_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Verified:</span>
+                      <span className="font-medium text-green-600 dark:text-green-400">{redgifsCacheStats.verified_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Unverified:</span>
+                      <span className="font-medium text-yellow-600 dark:text-yellow-400">{redgifsCacheStats.unverified_files}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Size Used:</span>
+                      <span className="font-medium">{redgifsCacheStats.total_mb} MB / {redgifsCacheStats.max_cache_mb} MB</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Max File Size:</span>
+                      <span className="font-medium">{redgifsCacheStats.max_file_mb} MB</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearRedgifsCache}
+                    className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Clear RedGifs Cache
+                  </button>
+                </>
+              ) : (
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  Unable to connect to RedGifs backend
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Recent History */}
       {(formData.sourceType === "local" && recentDirectories.length > 0) && (

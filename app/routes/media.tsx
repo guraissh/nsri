@@ -361,6 +361,56 @@ export default function Media() {
     [],
   );
 
+  const handleClearCache = async (item: VideoItem, index: number) => {
+    const src = item.src;
+    if (!src || !(src.includes('/proxy/bunkr-media') || src.includes('/proxy/media'))) {
+      alert('This video is not cached');
+      return;
+    }
+
+    try {
+      const url = new URL(src);
+      const originalUrl = url.searchParams.get('url');
+      if (!originalUrl) {
+        alert('Could not determine original URL');
+        return;
+      }
+
+      // Determine backend URL from proxy path
+      const backendUrl = src.includes('/proxy/bunkr-media')
+        ? (process.env.BUNKR_API_URL || 'http://localhost:8001')
+        : (process.env.REDGIFS_API_URL || 'http://localhost:8000');
+
+      // Call invalidate-cache endpoint
+      const response = await fetch(`/api/redgifs-tags?action=purge&url=${encodeURIComponent(originalUrl)}`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        alert('Cache cleared for this video. It will be re-downloaded on next play.');
+        // Reload the video by resetting its src
+        setVideos(prev => {
+          const newVideos = [...prev];
+          newVideos[index] = { ...newVideos[index], src: '' };
+          // Restore src after a brief delay to trigger reload
+          setTimeout(() => {
+            setVideos(prev2 => {
+              const newerVideos = [...prev2];
+              newerVideos[index] = { ...newerVideos[index], src: item.src };
+              return newerVideos;
+            });
+          }, 100);
+          return newVideos;
+        });
+      } else {
+        alert('Failed to clear cache');
+      }
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      alert('Error clearing cache');
+    }
+  };
+
   const handleDownload = (item: VideoItem) => {
     const link = document.createElement("a");
     link.href = item.src;
@@ -937,6 +987,7 @@ export default function Media() {
           onEndReached={handleEndReached}
           onItemVisible={handleItemVisible}
           onItemHidden={handleItemHidden}
+          onClearCache={handleClearCache}
           style={{
             maxHeight: "100dvh",
             height: "100%",

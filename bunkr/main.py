@@ -755,6 +755,83 @@ async def invalidate_cache(url: str = Query(..., description="URL to invalidate"
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/clear-all-cache")
+async def clear_all_cache():
+    """Clear all cached videos and reset database"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+
+        # Get all cached files
+        cursor.execute("SELECT filename FROM downloads")
+        files = cursor.fetchall()
+
+        deleted_count = 0
+        freed_bytes = 0
+
+        # Delete all files
+        for (filename,) in files:
+            file_path = DOWNLOADS_DIR / filename
+            try:
+                if file_path.exists():
+                    file_size = file_path.stat().st_size
+                    file_path.unlink()
+                    deleted_count += 1
+                    freed_bytes += file_size
+                    logger.debug(f"Deleted cache file: {filename}")
+            except Exception as e:
+                logger.error(f"Error deleting file {filename}: {str(e)}")
+
+        # Clear downloads table
+        cursor.execute("DELETE FROM downloads")
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Cleared all cache: {deleted_count} files, {freed_bytes / 1024 / 1024:.2f} MB freed")
+        return {
+            "status": "cleared",
+            "files_deleted": deleted_count,
+            "bytes_freed": freed_bytes,
+            "mb_freed": round(freed_bytes / 1024 / 1024, 2)
+        }
+    except Exception as e:
+        logger.error(f"Error clearing all cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/cache-stats")
+async def get_cache_stats():
+    """Get cache statistics"""
+    try:
+        conn = sqlite3.connect(CACHE_DB_PATH)
+        cursor = conn.cursor()
+
+        # Get total stats
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_files,
+                SUM(size_bytes) as total_bytes,
+                COUNT(CASE WHEN verified = 1 THEN 1 END) as verified_files
+            FROM downloads
+        """)
+        total_files, total_bytes, verified_files = cursor.fetchone()
+
+        conn.close()
+
+        return {
+            "total_files": total_files or 0,
+            "verified_files": verified_files or 0,
+            "unverified_files": (total_files or 0) - (verified_files or 0),
+            "total_bytes": total_bytes or 0,
+            "total_mb": round((total_bytes or 0) / 1024 / 1024, 2),
+            "max_cache_mb": MAX_CACHE_SIZE_GB * 1024,
+            "max_file_mb": MAX_FILE_SIZE_MB
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Mount downloads directory for serving cached files
 app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_DIR)), name="downloads")
 
