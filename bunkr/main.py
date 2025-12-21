@@ -2,6 +2,7 @@
 Bunkr Album Scraper - FastAPI Backend
 Extracts media URLs from Bunkr albums
 """
+from playwright_stealth.stealth import Stealth
 
 import asyncio
 import logging
@@ -11,16 +12,16 @@ import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List
-from urllib.parse import urlparse, urljoin
+from typing import Optional, List, Union
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Response, Download
 
 # Configure logging
 logging.basicConfig(
@@ -365,7 +366,7 @@ async def log_requests(request: Request, call_next):
 
 # Enable CORS for development
 app.add_middleware(
-    CORSMiddleware,
+    CORSMiddleware,  # ty:ignore[invalid-argument-type]
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -396,7 +397,7 @@ async def scrape_file_page(client: httpx.AsyncClient, file_url: str, base_domain
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Look for download button link to download page
-        download_button = soup.find('a', string=re.compile(r'Download', re.I))
+        download_button = soup.find('a', string=re.compile(r'Download', re.I))  # ty:ignore[no-matching-overload]
         if not download_button:
             # Try finding by class
             download_button = soup.find('a', href=re.compile(r'https?://get\.[^/]*bunkr'))
@@ -420,7 +421,7 @@ async def scrape_file_page(client: httpx.AsyncClient, file_url: str, base_domain
 async def get_cdn_url_with_playwright(download_page_url: str) -> Optional[str]:
     """Use Playwright to execute JavaScript and get the actual CDN URL"""
     try:
-        async with async_playwright() as p:
+        async with Stealth().use_async(async_playwright()) as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
@@ -432,7 +433,7 @@ async def get_cdn_url_with_playwright(download_page_url: str) -> Optional[str]:
                 nonlocal cdn_url
                 url = request.url
                 # Ignore ads and tracking URLs
-                if any(x in url.lower() for x in ['ad.', '/ad/', 'adraw', 'twinrdengine', 'mndx1']):
+                if any(x in url.lower() for x in ['ad.', '/ad/', 'adraw', 'twinrdengine', 'mndx1', 'maint']):
                     return
                 # Look for CDN URLs in outgoing requests (must be from bunkr domains or media CDNs)
                 if re.search(r'(cdn|media-files|stream|fs-)\d*\.(bunkr|bunkrr)', url, re.I):
@@ -440,48 +441,49 @@ async def get_cdn_url_with_playwright(download_page_url: str) -> Optional[str]:
                         logger.debug(f"Intercepted request to CDN: {url}")
                         cdn_url = url
 
-            async def handle_response(response):
+            async def handle_download(response: Download):
                 nonlocal cdn_url
                 url = response.url
+                
                 # Ignore ads and tracking URLs
-                if any(x in url.lower() for x in ['ad.', '/ad/', 'adraw', 'twinrdengine', 'mndx1', 'icon_']):
+                if any(x in url.lower() for x in ['ad.', '/ad/', 'adraw', 'twinrdengine', 'mndx1', 'icon_', 'maint']):
                     return
                 # Look for media file URLs in responses or redirects (must be from bunkr domains)
                 if re.search(r'\.(mp4|webm|mov|avi|mkv|jpg|jpeg|png|gif|webp)(\?|$)', url, re.I):
-                    if 'bunkr' in url.lower() or re.search(r'(cdn|media-files|stream|fs-)\d*\.', url, re.I):
+                    if 'bunkr' in url.lower():
+                        logger.debug(f"Intercepted download from CDN: {url}")
+                        cdn_url = url
+
+            async def handle_response(response: Response):
+                nonlocal cdn_url
+                url = response.url
+                
+                # Ignore ads and tracking URLs
+                if any(x in url.lower() for x in ['ad.', '/ad/', 'adraw', 'twinrdengine', 'mndx1', 'icon_', 'maint']):
+                    return
+                # Look for media file URLs in responses or redirects (must be from bunkr domains)
+                if re.search(r'\.(mp4|webm|mov|avi|mkv|jpg|jpeg|png|gif|webp)(\?|$)', url, re.I):
+                    if 'bunkr' in url.lower():
                         logger.debug(f"Intercepted response from CDN: {url}")
                         cdn_url = url
 
             page.on('request', handle_request)
             page.on('response', handle_response)
+            page.on('download', handle_download)
 
             # Navigate to download page
             await page.goto(download_page_url, wait_until='domcontentloaded', timeout=15000)
 
             # Wait for button and try to click it
             try:
-                download_btn = await page.wait_for_selector('a#download-btn', timeout=5000)
+                download_btn = await page.wait_for_selector('#download-btn', timeout=5000)
                 if download_btn:
                     # Wait a moment for JS to execute
                     await page.wait_for_timeout(1000)
 
                     # Get the href
-                    href = await download_btn.get_attribute('href')
-                    logger.debug(f"Download button href: {href}")
-
-                    if href and href != '#':
-                        if re.search(r'\.(mp4|webm|mov|avi|mkv|jpg|jpeg|png|gif|webp)', href, re.I):
-                            cdn_url = href
-                        elif href.startswith('http'):
-                            cdn_url = href
-
-                    # Try clicking to trigger any navigation/download
-                    if not cdn_url:
-                        try:
-                            await download_btn.click(timeout=3000)
-                            await page.wait_for_timeout(1000)
-                        except:
-                            pass
+                    await download_btn.click(timeout=3000, force=True)
+                    await page.wait_for_timeout(1000)
             except Exception as e:
                 logger.debug(f"Button interaction error: {str(e)}")
 
@@ -763,6 +765,7 @@ async def clear_all_cache():
         cursor = conn.cursor()
 
         cursor.execute("delete FROM downloads")
+        cursor.execute("delete from api_cache")
         # Get all cached files
         conn.commit()
         conn.close()
