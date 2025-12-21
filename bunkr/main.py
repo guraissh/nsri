@@ -762,38 +762,40 @@ async def clear_all_cache():
         conn = sqlite3.connect(CACHE_DB_PATH)
         cursor = conn.cursor()
 
+        cursor.execute("delete FROM downloads")
         # Get all cached files
-        cursor.execute("SELECT filename FROM downloads")
-        files = cursor.fetchall()
-
-        deleted_count = 0
-        freed_bytes = 0
-
-        # Delete all files
-        for (filename,) in files:
-            file_path = DOWNLOADS_DIR / filename
-            try:
-                if file_path.exists():
-                    file_size = file_path.stat().st_size
-                    file_path.unlink()
-                    deleted_count += 1
-                    freed_bytes += file_size
-                    logger.debug(f"Deleted cache file: {filename}")
-            except Exception as e:
-                logger.error(f"Error deleting file {filename}: {str(e)}")
-
-        # Clear downloads table
-        cursor.execute("DELETE FROM downloads")
         conn.commit()
         conn.close()
 
-        logger.info(f"Cleared all cache: {deleted_count} files, {freed_bytes / 1024 / 1024:.2f} MB freed")
-        return {
-            "status": "cleared",
-            "files_deleted": deleted_count,
-            "bytes_freed": freed_bytes,
-            "mb_freed": round(freed_bytes / 1024 / 1024, 2)
-        }
+        # Delete all files
+        if DOWNLOADS_DIR.exists():
+            freed_bytes = 0
+            deleted_count = 0
+            for file in DOWNLOADS_DIR.iterdir():
+                try:
+                    freed_bytes += file.stat().st_size
+                    deleted_count += 1
+                    file.unlink()
+                except Exception as e:
+                    logger.error(f"Error deleting file {file.name}: {str(e)}")
+
+        # Clear downloads table
+
+            logger.info(f"Cleared all cache: {deleted_count} files, {freed_bytes / 1024 / 1024:.2f} MB freed")
+            return {
+                "status": "cleared",
+                "files_deleted": deleted_count,
+                "bytes_freed": freed_bytes,
+                "mb_freed": round(freed_bytes / 1024 / 1024, 2)
+            }
+        else:
+            return {
+                "status": "cleared",
+                "files_deleted": 0,
+                "bytes_freed": 0,
+                "mb_freed": 0
+            }
+
     except Exception as e:
         logger.error(f"Error clearing all cache: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
